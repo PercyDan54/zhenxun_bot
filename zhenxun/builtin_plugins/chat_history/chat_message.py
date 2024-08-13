@@ -1,3 +1,5 @@
+from typing import List
+
 from nonebot import on_message
 from nonebot.plugin import PluginMetadata
 from nonebot_plugin_alconna import UniMsg
@@ -26,7 +28,21 @@ __plugin_meta__ = PluginMetadata(
                 help="是否开启消息自从存储",
                 default_value=True,
                 type=bool,
-            )
+            ),
+            RegisterConfig(
+                module="chat_history",
+                key="BLACK_WORD",
+                value=["签到", "抽签", "http:", "https:", "pptth", "nbnhhsh", "io"],
+                default_value=["签到", "抽签", "http:", "https:", "pptth", "nbnhhsh", "io"],
+                type=List[str],
+            ),
+            RegisterConfig(
+                module="chat_history",
+                key="BLACKLIST_USER",
+                value= [],
+                default_value=[],
+                type=List[int],
+            ),
         ],
     ).dict(),
 )
@@ -46,11 +62,21 @@ TEMP_LIST = []
 async def _(message: UniMsg, session: EventSession):
     # group_id = session.id3 or session.id2
     group_id = session.id2
+
+    msg = str(message).strip()
+    blacklist_users = Config.get_config("chat_history", "BLACKLIST_USER")
+    black_words = Config.get_config("chat_history", "BLACK_WORD")
+    if session.id1 in blacklist_users or msg.startswith('!') or msg.startswith('！') or msg.startswith('/'):
+        return
+    for w in black_words:
+        if str(w) in msg:
+            return
+
     TEMP_LIST.append(
         ChatHistory(
             user_id=session.id1,
             group_id=group_id,
-            text=str(message),
+            text=msg,
             plain_text=message.extract_plain_text(),
             bot_id=session.bot_id,
             platform=session.platform,
