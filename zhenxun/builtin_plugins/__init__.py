@@ -16,6 +16,7 @@ require("nonebot_plugin_apscheduler")
 require("nonebot_plugin_alconna")
 require("nonebot_plugin_session")
 require("nonebot_plugin_userinfo")
+require("nonebot_plugin_htmlrender")
 
 
 import nonebot
@@ -58,9 +59,12 @@ async def _():
         and not await SignUser.annotate().count()
     ):
         try:
-            group_user = await GroupInfoUser.filter(uid__isnull=False).all()
+            group_user = []
+            try:
+                group_user = await GroupInfoUser.filter(uid__isnull=False).all()
+            except Exception:
+                logger.warning("获取GroupInfoUser数据uid失败...")
             user2uid = {u.user_id: u.uid for u in group_user}
-            flag = False
             db = Tortoise.get_connection("default")
             old_sign_list = await db.execute_query_dict(SIGN_SQL)
             old_bag_list = await db.execute_query_dict(BAG_SQL)
@@ -70,7 +74,9 @@ async def _():
             }
             create_list = []
             sign_id_list = []
-            max_uid = max(user2uid.values()) + 1
+            max_uid = 0
+            if user2uid:
+                max_uid = max(user2uid.values()) + 1
             for old_sign in old_sign_list:
                 sign_id_list.append(old_sign["user_id"])
                 old_bag = [

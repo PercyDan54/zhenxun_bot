@@ -14,7 +14,6 @@ from zhenxun.models.ban_console import BanConsole
 from zhenxun.models.group_console import GroupConsole
 from zhenxun.models.plugin_info import PluginInfo
 from zhenxun.services.log import logger
-from zhenxun.utils._build_image import BuildImage
 from zhenxun.utils.enum import PluginType
 from zhenxun.utils.message import MessageUtils
 
@@ -25,7 +24,7 @@ __plugin_meta__ = PluginMetadata(
     extra=PluginExtraData(
         author="HibiKier",
         version="0.1",
-        plugin_type=PluginType.HIDDEN,
+        plugin_type=PluginType.DEPENDANT,
     ).dict(),
 )
 

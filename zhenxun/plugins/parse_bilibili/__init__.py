@@ -28,7 +28,8 @@ __plugin_meta__ = PluginMetadata(
     extra=PluginExtraData(
         author="leekooyo",
         version="0.1",
-        plugin_type=PluginType.HIDDEN,
+        plugin_type=PluginType.DEPENDANT,
+        menu_type="其他",
         configs=[
             RegisterConfig(
                 module="_task",
@@ -142,7 +143,7 @@ async def _(session: EventSession, message: UniMsg):
                 await MessageUtils.build_message(
                     [
                         _path,
-                        f"av{aid}\n标题：{title}\nUP：{author}\n上传日期：{date}\n回复：{reply}，收藏：{favorite}，投币：{coin}\n点赞：{like}，弹幕：{danmuku}\n{vd_url}",
+                        f"av{aid}\n标题：{title}\nUP：{author}\n上传日期：{date}\n回复：{reply}，收藏：{favorite}，投币：{coin}\n点赞：{like}，弹幕：{danmuku}\n{data.vd_url}",
                     ]
                 ).send()
 
