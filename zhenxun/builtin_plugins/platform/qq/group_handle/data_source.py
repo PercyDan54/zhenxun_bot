@@ -49,9 +49,8 @@ class GroupManager:
             group: GroupConsole
         """
         if group:
-            await GroupConsole.filter(
-                group_id=group_id, channel_id__isnull=True
-            ).update(group_flag=1)
+            group.group_flag = 1
+            await group.save(update_fields=["group_flag"])
         else:
             block_plugin = ""
             if plugin_list := await PluginInfo.filter(default_status=False).all():
@@ -113,7 +112,7 @@ class GroupManager:
 
     @classmethod
     async def add_bot(
-        cls, bot: Bot, operator_id: str, group_id: str, group: GroupConsole | None
+        cls, bot: Bot, operator_id: str, group_id: str, group: GroupConsole
     ):
         """拉入bot
 
@@ -123,7 +122,11 @@ class GroupManager:
             group_id: 群组id
             group: GroupConsole
         """
-        if base_config.get("flag") and operator_id not in bot.config.superusers:
+        if (
+            base_config.get("flag")
+            and operator_id not in bot.config.superusers
+            and group.group_flag != 1
+        ):
             """退出群组"""
             try:
                 if result_msg := base_config.get("message"):
