@@ -32,6 +32,7 @@ __plugin_meta__ = PluginMetadata(
             RegisterConfig(
                 module="chat_history",
                 key="BLACK_WORD",
+                help="包含以下关键词消息不存储",
                 value=["签到", "抽签", "http:", "https:", "pptth", "nbnhhsh", "io"],
                 default_value=["签到", "抽签", "http:", "https:", "pptth", "nbnhhsh", "io"],
                 type=List[str],
@@ -39,6 +40,7 @@ __plugin_meta__ = PluginMetadata(
             RegisterConfig(
                 module="chat_history",
                 key="BLACKLIST_USER",
+                help="以下用户的消息不存储",
                 value= [],
                 default_value=[],
                 type=List[int],
