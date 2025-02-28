@@ -2,12 +2,12 @@ from copy import deepcopy
 
 from ruamel.yaml import YAML
 
-from zhenxun.services.log import logger
 from zhenxun.configs.path_config import DATA_PATH
+from zhenxun.configs.utils import BaseBlock, PluginCdBlock, PluginCountBlock
 from zhenxun.models.plugin_info import PluginInfo
 from zhenxun.models.plugin_limit import PluginLimit
+from zhenxun.services.log import logger
 from zhenxun.utils.enum import BlockType, LimitCheckType, PluginLimitType
-from zhenxun.configs.utils import BaseBlock, PluginCdBlock, PluginCountBlock
 
 _yaml = YAML(pure=True)
 _yaml.indent = 2
@@ -112,7 +112,7 @@ class Manager:
         elif isinstance(data, BaseBlock):
             self.block_data[module] = data
 
-    def exist(self, module: str, type: PluginLimitType):
+    def exists(self, module: str, type: PluginLimitType):
         """是否存在"""
         if type == PluginLimitType.CD:
             return module in self.cd_data
@@ -181,7 +181,7 @@ class Manager:
                 del temp_data["test"]["check_type"]
         else:
             for v in temp_data:
-                temp_data[v] = temp_data[v].dict()
+                temp_data[v] = temp_data[v].to_dict()
                 if check_type := temp_data[v].get("check_type"):
                     temp_data[v]["check_type"] = str(check_type)
                 if watch_type := temp_data[v].get("watch_type"):

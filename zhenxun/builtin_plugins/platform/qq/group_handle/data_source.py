@@ -1,35 +1,34 @@
-import os
-import re
-import random
-from pathlib import Path
 from datetime import datetime
+import os
+from pathlib import Path
+import random
 
-import ujson as json
 from nonebot.adapters import Bot
-from nonebot_plugin_alconna import At
+from nonebot.exception import ActionFailed
+from nonebot_plugin_alconna import At, UniMessage
 from nonebot_plugin_uninfo import Uninfo
+import ujson as json
 
-from zhenxun.services.log import logger
+from zhenxun.builtin_plugins.platform.qq.exception import ForceAddGroupError
 from zhenxun.configs.config import Config
-from zhenxun.utils.utils import FreqLimiter
-from zhenxun.utils.message import MessageUtils
+from zhenxun.configs.path_config import DATA_PATH, IMAGE_PATH
 from zhenxun.models.fg_request import FgRequest
-from zhenxun.models.level_user import LevelUser
-from zhenxun.utils.enum import RequestHandleType
-from zhenxun.utils.platform import PlatformUtils
-from zhenxun.models.plugin_info import PluginInfo
-from zhenxun.utils.common_utils import CommonUtils
 from zhenxun.models.group_console import GroupConsole
 from zhenxun.models.group_member_info import GroupInfoUser
-from zhenxun.configs.path_config import DATA_PATH, IMAGE_PATH
-
-from ..exception import ForceAddGroupError
+from zhenxun.models.level_user import LevelUser
+from zhenxun.models.plugin_info import PluginInfo
+from zhenxun.services.log import logger
+from zhenxun.utils.common_utils import CommonUtils
+from zhenxun.utils.enum import RequestHandleType
+from zhenxun.utils.message import MessageUtils
+from zhenxun.utils.platform import PlatformUtils
+from zhenxun.utils.utils import FreqLimiter
 
 base_config = Config.get("invite_manager")
 
 limit_cd = base_config.get("welcome_msg_cd")
 
-WELCOME_PATH = DATA_PATH / "welcome_message" / "qq"
+WELCOME_PATH = DATA_PATH / "welcome_message"
 
 DEFAULT_IMAGE_PATH = IMAGE_PATH / "qxz"
 
@@ -56,7 +55,7 @@ class GroupManager:
             if plugin_list := await PluginInfo.filter(default_status=False).all():
                 for plugin in plugin_list:
                     block_plugin += f"<{plugin.module},"
-            group_info = await bot.get_group_info(group_id=group_id)
+            group_info = await bot.get_group_info(group_id=group_id, no_cache=True)
             await GroupConsole.create(
                 group_id=group_info["group_id"],
                 group_name=group_info["group_name"],
@@ -154,78 +153,114 @@ class GroupManager:
             await cls.__refresh_level(bot, group_id)
 
     @classmethod
-    def __build_welcome_message(cls, user_id: str, path: Path) -> list[At | Path | str]:
-        """构造群欢迎消息
+    def get_path(cls, session: Uninfo) -> Path | None:
+        """根据Session获取存储路径
 
         参数:
-            user_id: 用户id
-            path: 群欢迎消息存储路径
+            session: Uninfo:
 
         返回:
-            list[At | Path | str]: 消息列表
+            Path: 存储路径
         """
-        file = path / "text.json"
-        data = json.load(file.open(encoding="utf-8"))
-        message = data["message"]
-        msg_split = re.split(r"\[image:\d+\]", message)
-        msg_list = []
-        if data["at"]:
-            msg_list.append(At(flag="user", target=user_id))
-        for i, text in enumerate(msg_split):
-            msg_list.append(text)
-            img_file = path / f"{i}.png"
-            if img_file.exists():
-                msg_list.append(img_file)
-        return msg_list
+        if not session.group:
+            return None
+        platform = PlatformUtils.get_platform(session)
+        path = WELCOME_PATH / f"{platform}" / f"{session.group.id}"
+        if session.group.parent:
+            path = (
+                WELCOME_PATH
+                / f"{platform}"
+                / f"{session.group.parent.id}"
+                / f"{session.group.id}"
+            )
+        path.mkdir(parents=True, exist_ok=True)
+        return path
 
     @classmethod
-    async def __send_welcome_message(cls, user_id: str, group_id: str):
+    def __get_welcome_data(cls, session: Uninfo) -> dict | None:
+        """获取存储数据
+
+        参数:
+            session: Uninfo
+
+        返回:
+            dict | None: 欢迎消息数据
+        """
+        if not session.group:
+            return None
+        path = cls.get_path(session)
+        if not path:
+            return None
+        file = path / "text.json"
+        if not file.exists():
+            return None
+        with file.open(encoding="utf8") as f:
+            return json.load(f)
+
+    @classmethod
+    async def __send_welcome_message(cls, session: Uninfo, user_id: str):
         """发送群欢迎消息
 
         参数:
             user_id: 用户id
             group_id: 群组id
         """
-        cls._flmt.start_cd(group_id)
-        path = WELCOME_PATH / f"{group_id}"
-        file = path / "text.json"
-        if file.exists():
-            msg_list = cls.__build_welcome_message(user_id, path)
-            logger.info("发送群欢迎消息...", "入群检测", group_id=group_id)
+        if not session.group:
+            return
+        cls._flmt.start_cd(session.group.id)
+        if json_data := cls.__get_welcome_data(session):
+            key = random.choice([k for k in json_data.keys() if json_data[k]["status"]])
+            welcome_data = json_data[key]
+            msg_list = UniMessage().load(welcome_data["message"])
+            if welcome_data["at"]:
+                msg_list.insert(0, At("user", user_id))
+            logger.info("发送群欢迎消息...", "入群检测", session=session)
             if msg_list:
-                await MessageUtils.build_message(msg_list).send()  # type: ignore
-            else:
-                image = DEFAULT_IMAGE_PATH / random.choice(
-                    os.listdir(DEFAULT_IMAGE_PATH)
-                )
-                await MessageUtils.build_message(
-                    [
-                        "新人快跑啊！！本群现状↓（快使用自定义！）",
-                        image,
-                    ]
-                ).send()
+                await MessageUtils.build_message(msg_list).finish()  # type: ignore
+        image = DEFAULT_IMAGE_PATH / random.choice(os.listdir(DEFAULT_IMAGE_PATH))
+        await MessageUtils.build_message(
+            [
+                "新人快跑啊！！本群现状↓（快使用自定义群欢迎消息！）",
+                image,
+            ]
+        ).send()
 
     @classmethod
-    async def add_user(cls, session: Uninfo, bot: Bot, user_id: str, group_id: str):
+    async def add_user(cls, session: Uninfo, bot: Bot):
         """拉入用户
 
         参数:
+            session: Uninfo
             bot: Bot
-            user_id: 用户id
-            group_id: 群组id
         """
+        user_id = session.user.id
+        group_id = ""
+        if session.group:
+            if session.group.parent:
+                group_id = session.group.parent.id
+            else:
+                group_id = session.group.id
         join_time = datetime.now()
-        user_info = await bot.get_group_member_info(group_id=group_id, user_id=user_id)
+        try:
+            user_info = await bot.get_group_member_info(
+                group_id=int(group_id), user_id=int(user_id), no_cache=True
+            )
+        except ActionFailed as e:
+            logger.warning("获取用户信息识别...", e=e)
+            user_info = {"user_id": user_id, "group_id": group_id, "nickname": ""}
         await GroupInfoUser.update_or_create(
             user_id=str(user_info["user_id"]),
             group_id=str(user_info["group_id"]),
-            defaults={"user_name": user_info["nickname"], "user_join_time": join_time},
+            defaults={
+                "user_name": user_info["nickname"],
+                "user_join_time": join_time,
+            },
         )
         logger.info(f"用户{user_info['user_id']} 所属{user_info['group_id']} 更新成功")
         if not await CommonUtils.task_is_block(
             session, "group_welcome"
         ) and cls._flmt.check(group_id):
-            await cls.__send_welcome_message(user_id, group_id)
+            await cls.__send_welcome_message(session, user_id)
 
     @classmethod
     async def kick_bot(cls, bot: Bot, group_id: str, operator_id: str):
@@ -288,10 +323,13 @@ class GroupManager:
             group_id=group_id,
         )
         if sub_type == "kick":
-            operator = await bot.get_group_member_info(
-                user_id=int(operator_id), group_id=int(group_id)
-            )
-            operator_name = operator["card"] or operator["nickname"]
+            if operator_id != "0":
+                operator = await bot.get_group_member_info(
+                    user_id=int(operator_id), group_id=int(group_id)
+                )
+                operator_name = operator["card"] or operator["nickname"]
+            else:
+                operator_name = ""
             return f"{user_name} 被 {operator_name} 送走了."
         elif sub_type == "leave":
             return f"{user_name}离开了我们..."

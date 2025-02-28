@@ -1,18 +1,18 @@
-from nonebot.typing import T_State
-from nonebot.matcher import Matcher
-from nonebot_plugin_alconna import At
 from nonebot.adapters import Bot, Event
-from nonebot.message import run_preprocessor
 from nonebot.exception import IgnoredException
+from nonebot.matcher import Matcher
+from nonebot.message import run_preprocessor
+from nonebot.typing import T_State
+from nonebot_plugin_alconna import At
 from nonebot_plugin_session import EventSession
 
-from zhenxun.services.log import logger
 from zhenxun.configs.config import Config
-from zhenxun.utils.enum import PluginType
-from zhenxun.utils.utils import FreqLimiter
-from zhenxun.utils.message import MessageUtils
 from zhenxun.models.ban_console import BanConsole
 from zhenxun.models.group_console import GroupConsole
+from zhenxun.services.log import logger
+from zhenxun.utils.enum import PluginType
+from zhenxun.utils.message import MessageUtils
+from zhenxun.utils.utils import FreqLimiter
 
 Config.add_plugin_config(
     "hook",
@@ -29,6 +29,7 @@ _flmt = FreqLimiter(300)
 async def _(
     matcher: Matcher, bot: Bot, event: Event, state: T_State, session: EventSession
 ):
+    extra = {}
     if plugin := matcher.plugin:
         if metadata := plugin.metadata:
             extra = metadata.extra
@@ -66,7 +67,12 @@ async def _(
                         time_str = f"{hours} 小时 {minute}分钟"
                     else:
                         time_str = f"{minute} 分钟"
-            if time != -1 and ban_result and _flmt.check(user_id):
+            if (
+                not extra.get("ignore_prompt")
+                and time != -1
+                and ban_result
+                and _flmt.check(user_id)
+            ):
                 _flmt.start_cd(user_id)
                 await MessageUtils.build_message(
                     [

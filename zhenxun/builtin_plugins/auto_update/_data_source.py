@@ -1,35 +1,35 @@
 import os
 import shutil
+import subprocess
 import tarfile
 import zipfile
-import subprocess
 
 from nonebot.adapters import Bot
 from nonebot.utils import run_sync
 
 from zhenxun.services.log import logger
-from zhenxun.utils.http_utils import AsyncHttpx
-from zhenxun.utils.platform import PlatformUtils
 from zhenxun.utils.github_utils import GithubUtils
 from zhenxun.utils.github_utils.models import RepoInfo
+from zhenxun.utils.http_utils import AsyncHttpx
+from zhenxun.utils.platform import PlatformUtils
 
 from .config import (
-    TMP_PATH,
-    BASE_PATH,
     BACKUP_PATH,
-    RELEASE_URL,
-    REQ_TXT_FILE,
-    VERSION_FILE,
-    PYPROJECT_FILE,
-    REPLACE_FOLDERS,
+    BASE_PATH,
     BASE_PATH_STRING,
+    DEFAULT_GITHUB_URL,
     DOWNLOAD_GZ_FILE,
     DOWNLOAD_ZIP_FILE,
-    DEFAULT_GITHUB_URL,
-    PYPROJECT_LOCK_FILE,
-    REQ_TXT_FILE_STRING,
+    PYPROJECT_FILE,
     PYPROJECT_FILE_STRING,
+    PYPROJECT_LOCK_FILE,
     PYPROJECT_LOCK_FILE_STRING,
+    RELEASE_URL,
+    REPLACE_FOLDERS,
+    REQ_TXT_FILE,
+    REQ_TXT_FILE_STRING,
+    TMP_PATH,
+    VERSION_FILE,
 )
 
 
@@ -155,7 +155,7 @@ class UpdateManage:
         )
 
     @classmethod
-    async def update(cls, bot: Bot, user_id: str, version_type: str) -> str | None:
+    async def update(cls, bot: Bot, user_id: str, version_type: str) -> str:
         """更新操作
 
         参数:
@@ -171,7 +171,7 @@ class UpdateManage:
         url = None
         new_version = None
         repo_info = GithubUtils.parse_github_url(DEFAULT_GITHUB_URL)
-        if version_type in {"dev", "main"}:
+        if version_type in {"main"}:
             repo_info.branch = version_type
             new_version = await cls.__get_version_from_repo(repo_info)
             if new_version:
@@ -203,14 +203,15 @@ class UpdateManage:
         if await AsyncHttpx.download_file(url, download_file, stream=True):
             logger.debug("下载真寻最新版文件完成...", "检查更新")
             await _file_handle(new_version)
+            result = "版本更新完成"
             return (
-                f"版本更新完成\n"
+                f"{result}\n"
                 f"版本: {cur_version} -> {new_version}\n"
                 "请重新启动真寻以完成更新!"
             )
         else:
             logger.debug("下载真寻最新版文件失败...", "检查更新")
-        return None
+        return ""
 
     @classmethod
     def __get_version(cls) -> str:

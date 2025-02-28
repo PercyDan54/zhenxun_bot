@@ -1,22 +1,22 @@
 from nonebot.permission import SUPERUSER
 from nonebot.plugin import PluginMetadata
-from nonebot_plugin_session import EventSession, SessionLevel
 from nonebot_plugin_alconna import (
-    At,
+    Alconna,
     Args,
+    Arparma,
+    At,
     Match,
     Option,
-    Alconna,
-    Arparma,
     Subcommand,
     on_alconna,
 )
+from nonebot_plugin_session import EventSession, SessionLevel
 
+from zhenxun.configs.utils import PluginExtraData
+from zhenxun.models.level_user import LevelUser
 from zhenxun.services.log import logger
 from zhenxun.utils.enum import PluginType
 from zhenxun.utils.message import MessageUtils
-from zhenxun.models.level_user import LevelUser
-from zhenxun.configs.utils import PluginExtraData
 
 __plugin_meta__ = PluginMetadata(
     name="用户权限管理",
@@ -36,7 +36,7 @@ __plugin_meta__ = PluginMetadata(
         author="HibiKier",
         version="0.1",
         plugin_type=PluginType.SUPERUSER,
-    ).dict(),
+    ).to_dict(),
 )
 
 

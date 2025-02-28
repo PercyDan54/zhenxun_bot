@@ -1,12 +1,13 @@
 from nonebot.permission import SUPERUSER
 from nonebot.plugin import PluginMetadata
+from nonebot_plugin_alconna import Alconna, Args, Subcommand, on_alconna
 from nonebot_plugin_session import EventSession
-from nonebot_plugin_alconna import Args, Alconna, Subcommand, on_alconna
 
+from zhenxun.configs.utils import PluginExtraData
 from zhenxun.services.log import logger
 from zhenxun.utils.enum import PluginType
 from zhenxun.utils.message import MessageUtils
-from zhenxun.configs.utils import PluginExtraData
+from zhenxun.utils.utils import is_number
 
 from .data_source import ShopManage
 
@@ -25,16 +26,16 @@ __plugin_meta__ = PluginMetadata(
         author="HibiKier",
         version="0.1",
         plugin_type=PluginType.SUPERUSER,
-    ).dict(),
+    ).to_dict(),
 )
 
 _matcher = on_alconna(
     Alconna(
         "插件商店",
-        Subcommand("add", Args["plugin_id", int | str]),
-        Subcommand("remove", Args["plugin_id", int | str]),
+        Subcommand("add", Args["plugin_id", str]),
+        Subcommand("remove", Args["plugin_id", str]),
         Subcommand("search", Args["plugin_name_or_author", str]),
-        Subcommand("update", Args["plugin_id", int | str]),
+        Subcommand("update", Args["plugin_id", str]),
         Subcommand("update_all"),
     ),
     permission=SUPERUSER,
@@ -43,14 +44,14 @@ _matcher = on_alconna(
 )
 
 _matcher.shortcut(
-    r"添加插件",
+    r"(添加|安装)插件",
     command="插件商店",
     arguments=["add", "{%0}"],
     prefix=True,
 )
 
 _matcher.shortcut(
-    r"移除插件",
+    r"(移除|卸载)插件",
     command="插件商店",
     arguments=["remove", "{%0}"],
     prefix=True,
@@ -90,12 +91,12 @@ async def _(session: EventSession):
 
 
 @_matcher.assign("add")
-async def _(session: EventSession, plugin_id: int | str):
+async def _(session: EventSession, plugin_id: str):
     try:
-        if isinstance(plugin_id, str):
-            await MessageUtils.build_message(f"正在添加插件 Module: {plugin_id}").send()
-        else:
+        if is_number(plugin_id):
             await MessageUtils.build_message(f"正在添加插件 Id: {plugin_id}").send()
+        else:
+            await MessageUtils.build_message(f"正在添加插件 Module: {plugin_id}").send()
         result = await ShopManage.add_plugin(plugin_id)
     except Exception as e:
         logger.error(f"添加插件 Id: {plugin_id}失败", "插件商店", session=session, e=e)
@@ -107,7 +108,7 @@ async def _(session: EventSession, plugin_id: int | str):
 
 
 @_matcher.assign("remove")
-async def _(session: EventSession, plugin_id: int | str):
+async def _(session: EventSession, plugin_id: str):
     try:
         result = await ShopManage.remove_plugin(plugin_id)
     except Exception as e:
@@ -138,12 +139,12 @@ async def _(session: EventSession, plugin_name_or_author: str):
 
 
 @_matcher.assign("update")
-async def _(session: EventSession, plugin_id: int | str):
+async def _(session: EventSession, plugin_id: str):
     try:
-        if isinstance(plugin_id, str):
-            await MessageUtils.build_message(f"正在更新插件 Module: {plugin_id}").send()
-        else:
+        if is_number(plugin_id):
             await MessageUtils.build_message(f"正在更新插件 Id: {plugin_id}").send()
+        else:
+            await MessageUtils.build_message(f"正在更新插件 Module: {plugin_id}").send()
         result = await ShopManage.update_plugin(plugin_id)
     except Exception as e:
         logger.error(f"更新插件 Id: {plugin_id}失败", "插件商店", session=session, e=e)
@@ -153,6 +154,7 @@ async def _(session: EventSession, plugin_id: int | str):
     logger.info(f"更新插件 Id: {plugin_id}", "插件商店", session=session)
     await MessageUtils.build_message(result).send()
 
+
 @_matcher.assign("update_all")
 async def _(session: EventSession):
     try:
@@ -160,8 +162,6 @@ async def _(session: EventSession):
         result = await ShopManage.update_all_plugin()
     except Exception as e:
         logger.error("更新全部插件失败", "插件商店", session=session, e=e)
-        await MessageUtils.build_message(
-            f"更新全部插件失败 e: {e}"
-        ).finish()
+        await MessageUtils.build_message(f"更新全部插件失败 e: {e}").finish()
     logger.info("更新全部插件", "插件商店", session=session)
     await MessageUtils.build_message(result).send()

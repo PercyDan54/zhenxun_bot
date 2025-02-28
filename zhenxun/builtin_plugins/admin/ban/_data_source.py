@@ -3,8 +3,8 @@ from typing import Literal
 
 from nonebot_plugin_session import EventSession
 
-from zhenxun.models.level_user import LevelUser
 from zhenxun.models.ban_console import BanConsole
+from zhenxun.models.level_user import LevelUser
 from zhenxun.utils.image_utils import BuildImage, ImageTemplate
 
 
@@ -105,7 +105,7 @@ class BanManage:
         if idx:
             ban_data = await BanConsole.get_or_none(id=idx)
             if not ban_data:
-                return False, "该用户/群组不在黑名单中不足捏..."
+                return False, "该用户/群组不在黑名单中捏..."
             if ban_data.ban_level > user_level:
                 return False, "unBan权限等级不足捏..."
             await ban_data.delete()

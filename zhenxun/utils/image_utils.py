@@ -1,22 +1,21 @@
-import os
-import re
-import random
+from collections.abc import Awaitable, Callable
 from io import BytesIO
+import os
 from pathlib import Path
-from collections.abc import Callable, Awaitable
+import random
+import re
 
-import cv2
 import imagehash
-from PIL import Image
 from nonebot.utils import is_coroutine_callable
+from PIL import Image
 
+from zhenxun.configs.path_config import TEMP_PATH
 from zhenxun.services.log import logger
 from zhenxun.utils.http_utils import AsyncHttpx
-from zhenxun.configs.path_config import TEMP_PATH, IMAGE_PATH
 
 from ._build_image import BuildImage, ColorAlias
-from ._build_mat import MatType, BuildMat  # noqa: F401
-from ._image_template import RowStyle, ImageTemplate  # noqa: F401
+from ._build_mat import BuildMat, MatType  # noqa: F401
+from ._image_template import ImageTemplate, RowStyle  # noqa: F401
 
 # TODO: text2image 长度错误
 
@@ -39,8 +38,8 @@ async def text2image(
             fs / font_size: int -> 特殊文本大小
             fc / font_color: Union[str, Tuple[int, int, int]] -> 特殊文本颜色
         示例
-            在不在，<f font=YSHaoShenTi-2.ttf font_size=30 font_color=red>HibiKi小姐</f>，
-            你最近还好吗，<f font_size=15 font_color=black>我非常想你</f>，这段时间我非常不好过，
+            在不在，<f font=YSHaoShenTi-2.ttf font_size=30 font_color=red>HibiKi</f>，
+            你最近还好吗，<f font_size=15 font_color=black>我非常想你</f>，
             <f font_size=25>抽卡抽不到金色</f>，这让我很痛苦
     参数:
          text: 文本
@@ -272,7 +271,6 @@ def group_image(image_list: list[BuildImage]) -> tuple[list[list[BuildImage]], i
             _min_h = 999999
             _min_index = -1
             for i, ig in enumerate(image_group):
-                # if i not in is_use and (_h := sum([x.h for x in ig]) + img.h) > _min_h:
                 if (_h := sum([x.height for x in ig]) + img.height) < _min_h:
                     _min_h = _h
                     _min_index = i
@@ -346,30 +344,6 @@ async def build_sort_image(
             curr_h += img.height + 10
         curr_w += max([x.width for x in ig]) + 30
     return A
-
-
-def compressed_image(
-    in_file: str | Path,
-    out_file: str | Path | None = None,
-    ratio: float = 0.9,
-):
-    """压缩图片
-
-    参数:
-        in_file: 被压缩的文件路径
-        out_file: 压缩后输出的文件路径
-        ratio: 压缩率，宽高 * 压缩率
-    """
-    in_file = IMAGE_PATH / in_file if isinstance(in_file, str) else in_file
-    if out_file:
-        out_file = IMAGE_PATH / out_file if isinstance(out_file, str) else out_file
-    else:
-        out_file = in_file
-    h, w, d = cv2.imread(str(in_file.absolute())).shape
-    img = cv2.resize(
-        cv2.imread(str(in_file.absolute())), (int(w * ratio), int(h * ratio))
-    )
-    cv2.imwrite(str(out_file.absolute()), img)
 
 
 def get_img_hash(image_file: str | Path) -> str:

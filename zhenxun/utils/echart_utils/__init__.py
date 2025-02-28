@@ -3,8 +3,8 @@ import random
 
 from nonebot_plugin_htmlrender import template_to_pic
 
-from zhenxun.utils._build_image import BuildImage
 from zhenxun.configs.path_config import TEMPLATE_PATH
+from zhenxun.utils._build_image import BuildImage
 
 from .models import Barh
 
@@ -15,7 +15,7 @@ class ChartUtils:
     @classmethod
     async def barh(cls, data: Barh) -> BuildImage:
         """横向统计图"""
-        to_json = data.dict()
+        to_json = data.to_dict()
         to_json["background_image"] = (
             f"./background/{random.choice(os.listdir(BACKGROUND_PATH))}"
         )

@@ -3,8 +3,8 @@ from typing_extensions import Self
 
 from tortoise import fields
 
-from zhenxun.services.log import logger
 from zhenxun.services.db_context import Model
+from zhenxun.services.log import logger
 from zhenxun.utils.exception import UserAndGroupIsNone
 
 
@@ -24,7 +24,7 @@ class BanConsole(Model):
     operator = fields.CharField(255)
     """使用Ban命令的用户"""
 
-    class Meta:  # type: ignore
+    class Meta:  # pyright: ignore [reportIncompatibleVariableOverride]
         table = "ban_console"
         table_description = "封禁人员/群组数据表"
 

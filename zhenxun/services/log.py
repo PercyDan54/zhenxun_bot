@@ -1,19 +1,24 @@
-from typing import Any, overload
 from datetime import datetime, timedelta
+from typing import Any, overload
 
+import nonebot
 from nonebot import require
 
 require("nonebot_plugin_session")
 from loguru import logger as logger_
-from nonebot_plugin_session import Session
 from nonebot.log import default_filter, default_format
+from nonebot_plugin_session import Session
 from nonebot_plugin_uninfo import Session as uninfoSession
 
 from zhenxun.configs.path_config import LOG_PATH
 
+driver = nonebot.get_driver()
+
+log_level = driver.config.log_level or "INFO"
+
 logger_.add(
     LOG_PATH / f"{datetime.now().date()}.log",
-    level="INFO",
+    level=log_level,
     rotation="00:00",
     format=default_format,
     filter=default_filter,

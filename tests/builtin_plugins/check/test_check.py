@@ -1,17 +1,18 @@
+from collections import namedtuple
+from collections.abc import Callable
+from pathlib import Path
 import platform
 from typing import cast
-from pathlib import Path
-from collections.abc import Callable
 
 import nonebot
-from nonebug import App
-from respx import MockRouter
-from pytest_mock import MockerFixture
 from nonebot.adapters.onebot.v11 import Bot
 from nonebot.adapters.onebot.v11.event import GroupMessageEvent
+from nonebug import App
+from pytest_mock import MockerFixture
+from respx import MockRouter
 
+from tests.config import BotId, GroupId, MessageId, UserId
 from tests.utils import _v11_group_message_event
-from tests.config import BotId, UserId, GroupId, MessageId
 
 platform_uname = platform.uname_result(
     system="Linux",
@@ -25,6 +26,40 @@ cpuinfo_get_cpu_info = {"brand_raw": "Intel(R) Core(TM) i7-10700K"}
 
 def init_mocker(mocker: MockerFixture, tmp_path: Path):
     mock_psutil = mocker.patch("zhenxun.builtin_plugins.check.data_source.psutil")
+
+    # Define namedtuples for complex return values
+    CpuFreqs = namedtuple("CpuFreqs", ["current"])  # noqa: PYI024
+    VirtualMemoryInfo = namedtuple("VirtualMemoryInfo", ["used", "total", "percent"])  # noqa: PYI024
+    SwapInfo = namedtuple("SwapInfo", ["used", "total", "percent"])  # noqa: PYI024
+    DiskUsage = namedtuple("DiskUsage", ["used", "total", "free", "percent"])  # noqa: PYI024
+
+    # Set specific return values for psutil methods
+    mock_psutil.cpu_percent.return_value = 1.0  # CPU 使用率
+    mock_psutil.cpu_freq.return_value = CpuFreqs(current=0.0)  # CPU 频率
+    mock_psutil.cpu_count.return_value = 1  # CPU 核心数
+
+    # Memory Info
+    mock_psutil.virtual_memory.return_value = VirtualMemoryInfo(
+        used=1 * 1024**3,  # 1 GB in bytes for used memory
+        total=1 * 1024**3,  # 1 GB in bytes for total memory
+        percent=100.0,  # 100% of memory used
+    )
+
+    # Swap Info
+    mock_psutil.swap_memory.return_value = SwapInfo(
+        used=1 * 1024**3,  # 1 GB in bytes for used swap space
+        total=1 * 1024**3,  # 1 GB in bytes for total swap space
+        percent=100.0,  # 100% of swap space used
+    )
+
+    # Disk Usage
+    mock_psutil.disk_usage.return_value = DiskUsage(
+        used=1 * 1024**3,  # 1 GB in bytes for used disk space
+        total=1 * 1024**3,  # 1 GB in bytes for total disk space
+        free=0,  # No free space
+        percent=100.0,  # 100% of disk space used
+    )
+
     mock_cpuinfo = mocker.patch("zhenxun.builtin_plugins.check.data_source.cpuinfo")
     mock_cpuinfo.get_cpu_info.return_value = cpuinfo_get_cpu_info
 
@@ -67,9 +102,9 @@ async def test_check(
     """
     测试自检
     """
-    from zhenxun.configs.config import BotConfig
-    from zhenxun.builtin_plugins.check import _matcher
+    from zhenxun.builtin_plugins.check import _self_check_matcher
     from zhenxun.builtin_plugins.check.data_source import __get_version
+    from zhenxun.configs.config import BotConfig
 
     (
         mock_psutil,
@@ -81,7 +116,7 @@ async def test_check(
         mock_build_message_return,
         mock_template_path_new,
     ) = init_mocker(mocker, tmp_path)
-    async with app.test_matcher(_matcher) as ctx:
+    async with app.test_matcher(_self_check_matcher) as ctx:
         bot = create_bot(ctx)
         bot: Bot = cast(Bot, bot)
         raw_message = "自检"
@@ -94,28 +129,36 @@ async def test_check(
             to_me=True,
         )
         ctx.receive_event(bot=bot, event=event)
+        ctx.should_ignore_rule(_self_check_matcher)
+
+    data = {
+        "cpu_info": f"{mock_psutil.cpu_percent.return_value}% "
+        + f"- {mock_psutil.cpu_freq.return_value.current}Ghz "
+        + f"[{mock_psutil.cpu_count.return_value} core]",
+        "cpu_process": mock_psutil.cpu_percent.return_value,
+        "ram_info": f"{round(mock_psutil.virtual_memory.return_value.used / (1024 ** 3), 1)}"  # noqa: E501
+        + f" / {round(mock_psutil.virtual_memory.return_value.total / (1024 ** 3), 1)}"
+        + " GB",
+        "ram_process": mock_psutil.virtual_memory.return_value.percent,
+        "swap_info": f"{round(mock_psutil.swap_memory.return_value.used / (1024 ** 3), 1)}"  # noqa: E501
+        + f" / {round(mock_psutil.swap_memory.return_value.total / (1024 ** 3), 1)} GB",
+        "swap_process": mock_psutil.swap_memory.return_value.percent,
+        "disk_info": f"{round(mock_psutil.disk_usage.return_value.used / (1024 ** 3), 1)}"  # noqa: E501
+        + f" / {round(mock_psutil.disk_usage.return_value.total / (1024 ** 3), 1)} GB",
+        "disk_process": mock_psutil.disk_usage.return_value.percent,
+        "brand_raw": cpuinfo_get_cpu_info["brand_raw"],
+        "baidu": "red",
+        "google": "red",
+        "system": f"{platform_uname.system} " f"{platform_uname.release}",
+        "version": __get_version(),
+        "plugin_count": len(nonebot.get_loaded_plugins()),
+        "nickname": BotConfig.self_nickname,
+    }
+
     mock_template_to_pic.assert_awaited_once_with(
         template_path=str((mock_template_path_new / "check").absolute()),
         template_name="main.html",
-        templates={
-            "data": {
-                "cpu_info": "1.0% - 1.0Ghz [1 core]",
-                "cpu_process": 1.0,
-                "ram_info": "1.0 / 1.0 GB",
-                "ram_process": 100.0,
-                "swap_info": "1.0 / 1.0 GB",
-                "swap_process": 100.0,
-                "disk_info": "1.0 / 1.0 GB",
-                "disk_process": 100.0,
-                "brand_raw": cpuinfo_get_cpu_info["brand_raw"],
-                "baidu": "red",
-                "google": "red",
-                "system": f"{platform_uname.system} " f"{platform_uname.release}",
-                "version": __get_version(),
-                "plugin_count": len(nonebot.get_loaded_plugins()),
-                "nickname": BotConfig.self_nickname,
-            }
-        },
+        templates={"data": data},
         pages={
             "viewport": {"width": 195, "height": 750},
             "base_url": f"file://{mock_template_path_new.absolute()}",
@@ -137,9 +180,9 @@ async def test_check_arm(
     """
     测试自检（arm）
     """
-    from zhenxun.configs.config import BotConfig
-    from zhenxun.builtin_plugins.check import _matcher
+    from zhenxun.builtin_plugins.check import _self_check_matcher
     from zhenxun.builtin_plugins.check.data_source import __get_version
+    from zhenxun.configs.config import BotConfig
 
     platform_uname_arm = platform.uname_result(
         system="Linux",
@@ -171,7 +214,7 @@ async def test_check_arm(
     mock_cpuinfo.get_cpu_info.return_value = {}
     mock_psutil.cpu_freq.return_value = {}
 
-    async with app.test_matcher(_matcher) as ctx:
+    async with app.test_matcher(_self_check_matcher) as ctx:
         bot = create_bot(ctx)
         bot: Bot = cast(Bot, bot)
         raw_message = "自检"
@@ -184,6 +227,7 @@ async def test_check_arm(
             to_me=True,
         )
         ctx.receive_event(bot=bot, event=event)
+        ctx.should_ignore_rule(_self_check_matcher)
     mock_template_to_pic.assert_awaited_once_with(
         template_path=str((mock_template_path_new / "check").absolute()),
         template_name="main.html",

@@ -1,23 +1,23 @@
 import os
-import platform
 from pathlib import Path
+import platform
 
-import nonebot
 import aiofiles
+import nonebot
 from nonebot import on_command
-from nonebot.rule import to_me
 from nonebot.adapters import Bot
 from nonebot.params import ArgStr
 from nonebot.permission import SUPERUSER
-from nonebot_plugin_uninfo import Uninfo
 from nonebot.plugin import PluginMetadata
+from nonebot.rule import to_me
+from nonebot_plugin_uninfo import Uninfo
 
+from zhenxun.configs.config import BotConfig
+from zhenxun.configs.utils import PluginExtraData
 from zhenxun.services.log import logger
 from zhenxun.utils.enum import PluginType
-from zhenxun.configs.config import BotConfig
 from zhenxun.utils.message import MessageUtils
 from zhenxun.utils.platform import PlatformUtils
-from zhenxun.configs.utils import PluginExtraData
 
 __plugin_meta__ = PluginMetadata(
     name="重启",
@@ -27,7 +27,7 @@ __plugin_meta__ = PluginMetadata(
     """.strip(),
     extra=PluginExtraData(
         author="HibiKier", version="0.1", plugin_type=PluginType.SUPERUSER
-    ).dict(),
+    ).to_dict(),
 )
 
 
@@ -89,7 +89,7 @@ async def _(bot: Bot):
         async with aiofiles.open(RESTART_MARK, encoding="utf8") as f:
             bot_id, user_id = (await f.read()).split()
         if bot := nonebot.get_bot(bot_id):
-            if target := PlatformUtils.get_target(bot, user_id):
+            if target := PlatformUtils.get_target(user_id=user_id):
                 await MessageUtils.build_message(
                     f"{BotConfig.self_nickname}已成功重启！"
                 ).send(target, bot=bot)

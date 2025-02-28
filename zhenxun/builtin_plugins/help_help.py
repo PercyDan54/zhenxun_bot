@@ -2,20 +2,20 @@ import os
 import random
 
 from nonebot import on_message
-from nonebot.rule import to_me
 from nonebot.matcher import Matcher
 from nonebot.plugin import PluginMetadata
+from nonebot.rule import to_me
 from nonebot_plugin_alconna import UniMsg
 from nonebot_plugin_session import EventSession
 
+from zhenxun.configs.path_config import IMAGE_PATH
+from zhenxun.configs.utils import PluginExtraData
+from zhenxun.models.ban_console import BanConsole
+from zhenxun.models.group_console import GroupConsole
+from zhenxun.models.plugin_info import PluginInfo
 from zhenxun.services.log import logger
 from zhenxun.utils.enum import PluginType
 from zhenxun.utils.message import MessageUtils
-from zhenxun.configs.utils import PluginExtraData
-from zhenxun.models.ban_console import BanConsole
-from zhenxun.models.plugin_info import PluginInfo
-from zhenxun.configs.path_config import IMAGE_PATH
-from zhenxun.models.group_console import GroupConsole
 
 __plugin_meta__ = PluginMetadata(
     name="笨蛋检测",
@@ -26,7 +26,7 @@ __plugin_meta__ = PluginMetadata(
         version="0.1",
         plugin_type=PluginType.DEPENDANT,
         menu_type="其他",
-    ).dict(),
+    ).to_dict(),
 )
 
 _matcher = on_message(rule=to_me(), priority=996, block=False)
@@ -48,7 +48,11 @@ async def _(matcher: Matcher, message: UniMsg, session: EventSession):
                 return
     if text := message.extract_plain_text().strip():
         if plugin := await PluginInfo.get_or_none(
-            name=text, load_status=True, plugin_type=PluginType.NORMAL
+            name=text,
+            load_status=True,
+            plugin_type=PluginType.NORMAL,
+            block_type__isnull=True,
+            status=True,
         ):
             image = None
             if _path.exists():

@@ -1,17 +1,17 @@
-from typing import cast
-from pathlib import Path
 from collections.abc import Callable
+from pathlib import Path
+from typing import cast
 
-from nonebug import App
-from respx import MockRouter
-from pytest_mock import MockerFixture
 from nonebot.adapters.onebot.v11 import Bot
-from nonebot.adapters.onebot.v11.message import Message
 from nonebot.adapters.onebot.v11.event import GroupMessageEvent
+from nonebot.adapters.onebot.v11.message import Message
+from nonebug import App
+from pytest_mock import MockerFixture
+from respx import MockRouter
 
-from tests.utils import _v11_group_message_event
-from tests.config import BotId, UserId, GroupId, MessageId
 from tests.builtin_plugins.plugin_store.utils import init_mocked_api
+from tests.config import BotId, GroupId, MessageId, UserId
+from tests.utils import _v11_group_message_event
 
 
 async def test_update_plugin_basic_need_update(
@@ -65,7 +65,7 @@ async def test_update_plugin_basic_need_update(
         )
     assert mocked_api["basic_plugins"].called
     assert mocked_api["extra_plugins"].called
-    assert mocked_api["search_image_plugin_file_init"].called
+    assert mocked_api["search_image_plugin_file_init_commit"].called
     assert (mock_base_path / "plugins" / "search_image" / "__init__.py").is_file()
 
 

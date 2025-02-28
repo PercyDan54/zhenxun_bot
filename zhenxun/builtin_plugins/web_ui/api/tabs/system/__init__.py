@@ -1,6 +1,6 @@
 import os
-import shutil
 from pathlib import Path
+import shutil
 
 import aiofiles
 from fastapi import APIRouter
@@ -10,7 +10,7 @@ from zhenxun.utils._build_image import BuildImage
 
 from ....base_model import Result, SystemFolderSize
 from ....utils import authentication, get_system_disk
-from .model import AddFile, DirFile, SaveFile, DeleteFile, RenameFile
+from .model import AddFile, DeleteFile, DirFile, RenameFile, SaveFile
 
 router = APIRouter(prefix="/system")
 
@@ -44,11 +44,11 @@ async def _(path: str | None = None) -> Result[list[DirFile]]:
 @router.get(
     "/get_resources_size",
     dependencies=[authentication()],
-    response_model=Result[SystemFolderSize],
+    response_model=Result[list[SystemFolderSize]],
     response_class=JSONResponse,
     description="获取文件列表",
 )
-async def _(full_path: str | None = None) -> Result[SystemFolderSize]:
+async def _(full_path: str | None = None) -> Result[list[SystemFolderSize]]:
     return Result.ok(await get_system_disk(full_path))
 
 

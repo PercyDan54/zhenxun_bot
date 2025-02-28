@@ -1,7 +1,5 @@
-from nonebot.adapters import Bot
-from nonebot_plugin_uninfo import Uninfo
 from nonebot import on_notice, on_request
-from nonebot.plugin import PluginMetadata
+from nonebot.adapters import Bot
 from nonebot.adapters.onebot.v11 import (
     GroupDecreaseNoticeEvent,
     GroupIncreaseNoticeEvent,
@@ -10,17 +8,19 @@ from nonebot.adapters.onebot.v12 import (
     GroupMemberDecreaseEvent,
     GroupMemberIncreaseEvent,
 )
+from nonebot.plugin import PluginMetadata
+from nonebot_plugin_uninfo import Uninfo
 
-from zhenxun.utils.enum import PluginType
-from zhenxun.utils.rules import notice_rule
-from zhenxun.utils.platform import PlatformUtils
-from zhenxun.utils.common_utils import CommonUtils
-from zhenxun.configs.config import Config, BotConfig
+from zhenxun.builtin_plugins.platform.qq.exception import ForceAddGroupError
+from zhenxun.configs.config import BotConfig, Config
+from zhenxun.configs.utils import PluginExtraData, RegisterConfig, Task
 from zhenxun.models.group_console import GroupConsole
-from zhenxun.configs.utils import Task, RegisterConfig, PluginExtraData
+from zhenxun.utils.common_utils import CommonUtils
+from zhenxun.utils.enum import PluginType
+from zhenxun.utils.platform import PlatformUtils
+from zhenxun.utils.rules import notice_rule
 
 from .data_source import GroupManager
-from ..exception import ForceAddGroupError
 
 __plugin_meta__ = PluginMetadata(
     name="QQ群事件处理",
@@ -84,7 +84,7 @@ __plugin_meta__ = PluginMetadata(
                 default_status=False,
             ),
         ],
-    ).dict(),
+    ).to_dict(),
 )
 
 
@@ -103,7 +103,7 @@ group_increase_handle = on_notice(
 group_decrease_handle = on_notice(
     priority=1,
     block=False,
-    rule=notice_rule([GroupMemberDecreaseEvent, GroupMemberIncreaseEvent]),
+    rule=notice_rule([GroupMemberDecreaseEvent, GroupDecreaseNoticeEvent]),
 )
 """群员减少处理"""
 add_group = on_request(priority=1, block=False)
@@ -116,19 +116,19 @@ async def _(
     session: Uninfo,
     event: GroupIncreaseNoticeEvent | GroupMemberIncreaseEvent,
 ):
-    user_id = str(event.user_id)
-    group_id = str(event.group_id)
-    if user_id == bot.self_id:
+    if session.user.id == bot.self_id:
         """新成员为bot本身"""
         group, _ = await GroupConsole.get_or_create(
-            group_id=group_id, channel_id__isnull=True
+            group_id=str(event.group_id), channel_id__isnull=True
         )
         try:
-            await GroupManager.add_bot(bot, str(event.operator_id), group_id, group)
+            await GroupManager.add_bot(
+                bot, str(event.operator_id), str(event.group_id), group
+            )
         except ForceAddGroupError as e:
             await PlatformUtils.send_superuser(bot, e.get_info())
     else:
-        await GroupManager.add_user(session, bot, user_id, group_id)
+        await GroupManager.add_user(session, bot)
 
 
 @group_decrease_handle.handle()

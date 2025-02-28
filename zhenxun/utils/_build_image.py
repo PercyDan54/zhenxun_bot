@@ -1,17 +1,18 @@
-import math
-import uuid
 import base64
-import itertools
 import contextlib
 from io import BytesIO
+import itertools
+import math
 from pathlib import Path
-from typing_extensions import Self
 from typing import Literal, TypeAlias, overload
+from typing_extensions import Self
+import uuid
 
 from nonebot.utils import run_sync
+from PIL import Image, ImageDraw, ImageFilter, ImageFont
 from PIL.Image import Image as tImage
+from PIL.Image import Resampling, Transpose
 from PIL.ImageFont import FreeTypeFont
-from PIL import Image, ImageDraw, ImageFont, ImageFilter
 
 from zhenxun.configs.path_config import FONT_PATH
 
@@ -62,7 +63,7 @@ class BuildImage:
             else:
                 self.markImg = Image.open(background)
             if width and height:
-                self.markImg = self.markImg.resize((width, height), Image.LANCZOS)
+                self.markImg = self.markImg.resize((width, height), Resampling.LANCZOS)
             else:
                 self.width = self.markImg.width
                 self.height = self.markImg.height
@@ -487,7 +488,7 @@ class BuildImage:
         x, y = self.markImg.size
         for i, k in itertools.product(range(n, x - n), range(n, y - n)):
             color = self.markImg.getpixel((i, k))
-            color = color[:-1] + (int(100 * alpha_ratio),)
+            color = color[:-1] + (int(100 * alpha_ratio),)  # type: ignore
             self.markImg.putpixel((i, k), color)
         self.draw = ImageDraw.Draw(self.markImg)
         return self
@@ -510,7 +511,13 @@ class BuildImage:
             bytes: bytes
         """
         buf = BytesIO()
-        self.markImg.save(buf, format="PNG")
+        img_format = self.markImg.format.upper() if self.markImg.format else "PNG"
+
+        if img_format == "GIF":
+            self.markImg.save(buf, format="GIF", save_all=True, loop=0)
+        else:
+            self.markImg.save(buf, format="PNG")
+
         return buf.getvalue()
 
     def convert(self, type_: ModeType) -> Self:
@@ -617,7 +624,7 @@ class BuildImage:
             left, top = ((value + offset) * antialias for value in ellipse_box[:2])
             right, bottom = ((value - offset) * antialias for value in ellipse_box[2:])
             draw.ellipse([left, top, right, bottom], fill=fill)
-        mask = mask.resize(self.markImg.size, Image.LANCZOS)
+        mask = mask.resize(self.markImg.size, Resampling.LANCZOS)
         with contextlib.suppress(ValueError):
             self.markImg.putalpha(mask)
         return self
@@ -679,7 +686,7 @@ class BuildImage:
         return self
 
     @run_sync
-    def transpose(self, angle: Literal[0, 1, 2, 3, 4, 5, 6]) -> Self:
+    def transpose(self, angle: Transpose) -> Self:
         """
         旋转图片(包括边框)
 

@@ -1,15 +1,15 @@
 from datetime import datetime, timedelta
 
-import pytz
 import nonebot
 from nonebot_plugin_apscheduler import scheduler
+import pytz
 
-from zhenxun.services.log import logger
 from zhenxun.configs.config import Config
-from zhenxun.models.task_info import TaskInfo
-from zhenxun.utils.platform import PlatformUtils
 from zhenxun.models.chat_history import ChatHistory
 from zhenxun.models.group_console import GroupConsole
+from zhenxun.models.task_info import TaskInfo
+from zhenxun.services.log import logger
+from zhenxun.utils.platform import PlatformUtils
 
 Config.add_plugin_config(
     "chat_check",
@@ -37,8 +37,7 @@ async def _():
     update_list = []
     if modules := await TaskInfo.annotate().values_list("module", flat=True):
         for bot in nonebot.get_bots().values():
-            group_list, _ = await PlatformUtils.get_group_list(bot)
-            group_list = [g for g in group_list if g.channel_id is None]
+            group_list, _ = await PlatformUtils.get_group_list(bot, True)
             for group in group_list:
                 try:
                     last_message = (
