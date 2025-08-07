@@ -11,6 +11,8 @@ from zhenxun.services.log import logger
 from zhenxun.utils.enum import PluginType
 from zhenxun.utils.utils import get_entity_ids
 
+from typing import List
+
 __plugin_meta__ = PluginMetadata(
     name="消息存储",
     description="消息存储，被动存储群消息",
@@ -62,13 +64,13 @@ TEMP_LIST = []
 async def _(message: UniMsg, session: Uninfo):
     entity = get_entity_ids(session)
     msg = str(message).strip()
-        blacklist_users = Config.get_config("chat_history", "BLACKLIST_USER")
-        black_words = Config.get_config("chat_history", "BLACK_WORD")
-        if len(msg) > 200 or entity.user_id in blacklist_users or msg.startswith('!') or msg.startswith('?') or msg.startswith('？') or msg.startswith('！') or msg.startswith('/'):
+    blacklist_users = Config.get_config("chat_history", "BLACKLIST_USER")
+    black_words = Config.get_config("chat_history", "BLACK_WORD")
+    if len(msg) > 200 or entity.user_id in blacklist_users or msg.startswith('!') or msg.startswith('?') or msg.startswith('？') or msg.startswith('！') or msg.startswith('/'):
+        return
+    for w in black_words:
+        if str(w) in msg:
             return
-        for w in black_words:
-            if str(w) in msg:
-                return
     TEMP_LIST.append(
         ChatHistory(
             user_id=entity.user_id,
