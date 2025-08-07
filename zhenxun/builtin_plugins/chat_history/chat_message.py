@@ -11,8 +11,6 @@ from zhenxun.services.log import logger
 from zhenxun.utils.enum import PluginType
 from zhenxun.utils.utils import get_entity_ids
 
-from typing import List
-
 __plugin_meta__ = PluginMetadata(
     name="消息存储",
     description="消息存储，被动存储群消息",
@@ -36,7 +34,7 @@ __plugin_meta__ = PluginMetadata(
                 help="包含以下关键词消息不存储",
                 value=["签到", "抽签", "http:", "https:", "pptth", "nbnhhsh", "io"],
                 default_value=["签到", "抽签", "http:", "https:", "pptth", "nbnhhsh", "io"],
-                type=List[str],
+                type=list[str],
             ),
             RegisterConfig(
                 module="chat_history",
@@ -44,7 +42,7 @@ __plugin_meta__ = PluginMetadata(
                 help="以下用户的消息不存储",
                 value= [],
                 default_value=[],
-                type=List[int],
+                type=list[str],
             ),
         ],
     ).to_dict(),
@@ -66,7 +64,7 @@ async def _(message: UniMsg, session: Uninfo):
     msg = str(message).strip()
     blacklist_users = Config.get_config("chat_history", "BLACKLIST_USER")
     black_words = Config.get_config("chat_history", "BLACK_WORD")
-    if len(msg) > 200 or entity.user_id in blacklist_users or msg.startswith('!') or msg.startswith('?') or msg.startswith('？') or msg.startswith('！') or msg.startswith('/'):
+    if len(msg) > 200 or entity.user_id in blacklist_users or msg.startswith("!") or msg.startswith("?") or msg.startswith("？") or msg.startswith("！") or msg.startswith("/"):
         return
     for w in black_words:
         if str(w) in msg:
