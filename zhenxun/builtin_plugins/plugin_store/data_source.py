@@ -14,7 +14,7 @@ from zhenxun.utils.image_utils import BuildImage, ImageTemplate, RowStyle
 from zhenxun.utils.manager.virtual_env_package_manager import VirtualEnvPackageManager
 from zhenxun.utils.repo_utils import RepoFileManager
 from zhenxun.utils.repo_utils.models import RepoFileInfo, RepoType
-from zhenxun.utils.utils import is_number
+from zhenxun.utils.utils import is_number, win_on_rm_error
 
 from .config import (
     BASE_PATH,
@@ -163,13 +163,17 @@ class StoreManager:
 
     @classmethod
     async def get_plugin_by_value(
-        cls, index_or_module: str, is_update: bool = False
+        cls,
+        index_or_module: str,
+        is_update: bool = False,
+        is_remove: bool = False,
     ) -> tuple[StorePluginInfo, bool]:
         """获取插件信息
 
         参数:
             index_or_module: 插件索引或模块名
             is_update: 是否是更新插件
+            is_remove: 是否是移除插件
 
         异常:
             PluginStoreException: 插件不存在
@@ -196,14 +200,26 @@ class StoreManager:
                 break
         if not plugin_info:
             raise PluginStoreException(f"插件不存在: {plugin_key}")
-        if not is_update and plugin_info.module in [p[0] for p in db_plugin_list]:
+
+        modules = [p[0] for p in db_plugin_list]
+
+        if is_remove:
+            if plugin_info.module not in modules:
+                raise PluginStoreException(f"插件 {plugin_info.name} 未安装，无法移除")
+            return plugin_info, is_external
+
+        if is_update:
+            if plugin_info.module not in modules:
+                raise PluginStoreException(f"插件 {plugin_info.name} 未安装，无法更新")
+            return plugin_info, is_external
+
+        if plugin_info.module in modules:
             raise PluginStoreException(f"插件 {plugin_info.name} 已安装，无需重复安装")
-        if plugin_info.module not in [p[0] for p in db_plugin_list] and is_update:
-            raise PluginStoreException(f"插件 {plugin_info.name} 未安装，无法更新")
+
         return plugin_info, is_external
 
     @classmethod
-    async def add_plugin(cls, index_or_module: str) -> str:
+    async def add_plugin(cls, index_or_module: str, source: str | None = None) -> str:
         """添加插件
 
         参数:
@@ -225,6 +241,7 @@ class StoreManager:
             plugin_info.module_path,
             plugin_info.is_dir,
             is_external,
+            source,
         )
         return f"插件 {plugin_info.name} 安装成功! 重启后生效"
 
@@ -235,6 +252,7 @@ class StoreManager:
         module_path: str,
         is_dir: bool,
         is_external: bool = False,
+        source: str | None = None,
     ):
         """安装插件
 
@@ -245,7 +263,12 @@ class StoreManager:
             is_external: 是否是外部仓库
         """
         repo_type = RepoType.GITHUB if is_external else None
+        if source == "ali":
+            repo_type = RepoType.ALIYUN
+        elif source == "git":
+            repo_type = RepoType.GITHUB
         replace_module_path = module_path.replace(".", "/")
+        plugin_name = module_path.split(".")[-1]
         if is_dir:
             files = await RepoFileManager.list_directory_files(
                 github_url, replace_module_path, repo_type=repo_type
@@ -253,11 +276,18 @@ class StoreManager:
         else:
             files = [RepoFileInfo(path=f"{replace_module_path}.py", is_dir=False)]
         local_path = BASE_PATH / "plugins" if is_external else BASE_PATH
+        target_dir = BASE_PATH / "plugins" / plugin_name
         files = [file for file in files if not file.is_dir]
         download_files = [(file.path, local_path / file.path) for file in files]
-        await RepoFileManager.download_files(
-            github_url, download_files, repo_type=repo_type
+        result = await RepoFileManager.download_files(
+            github_url,
+            download_files,
+            repo_type=repo_type,
+            sparse_path=replace_module_path,
+            target_dir=target_dir,
         )
+        if not result.success:
+            raise PluginStoreException(result.error_message)
 
         requirement_paths = [
             file
@@ -310,7 +340,7 @@ class StoreManager:
         返回:
             str: 返回消息
         """
-        plugin_info, _ = await cls.get_plugin_by_value(index_or_module)
+        plugin_info, _ = await cls.get_plugin_by_value(index_or_module, is_remove=True)
         path = BASE_PATH
         if plugin_info.github_url:
             path = BASE_PATH / "plugins"
@@ -322,7 +352,8 @@ class StoreManager:
             return f"插件 {plugin_info.name} 不存在..."
         logger.debug(f"尝试移除插件 {plugin_info.name} 文件: {path}", LOG_COMMAND)
         if plugin_info.is_dir:
-            shutil.rmtree(path)
+            # 处理 Windows 下 .git 等目录内只读文件导致的 WinError 5
+            shutil.rmtree(path, onerror=win_on_rm_error)
         else:
             path.unlink()
         await PluginInitManager.remove(f"zhenxun.{plugin_info.module_path}")
@@ -416,7 +447,7 @@ class StoreManager:
         update_success_list = []
         result = "--已更新{}个插件 {}个失败 {}个成功--"
         logger.info(f"尝试更新全部插件 {plugin_name_list}", LOG_COMMAND)
-        for plugin_info in plugin_list:
+        for plugin_info in all_plugin_list:
             try:
                 db_plugin_list = await cls.get_loaded_plugins("module", "version")
                 suc_plugin = {p[0]: (p[1] or "Unknown") for p in db_plugin_list}
@@ -496,11 +527,11 @@ class StoreManager:
                 raise PluginStoreException("插件ID不存在...")
             return all_plugin_list[idx].module
         elif isinstance(plugin_id, str):
-            result = (
-                None
-                if plugin_id not in [v.module for v in all_plugin_list]
-                else plugin_id
-            ) or next(v for v in all_plugin_list if v.name == plugin_id).module
-            if not result:
-                raise PluginStoreException("插件 Module / 名称 不存在...")
-            return result
+            if plugin_id in [v.module for v in all_plugin_list]:
+                return plugin_id
+
+            for plugin_info in all_plugin_list:
+                if plugin_info.name.lower() == plugin_id.lower():
+                    return plugin_info.module
+
+            raise PluginStoreException("插件 Module / 名称 不存在...")

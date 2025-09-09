@@ -1,9 +1,10 @@
 from typing import Any
 
+from zhenxun.services import renderer_service
 from zhenxun.services.llm.core import KeyStatus
 from zhenxun.services.llm.types import ModelModality
-from zhenxun.utils._build_image import BuildImage
-from zhenxun.utils._image_template import ImageTemplate, Markdown, RowStyle
+from zhenxun.ui.builders import MarkdownBuilder, TableBuilder
+from zhenxun.ui.models import StatusBadgeCell, TextCell
 
 
 def _format_seconds(seconds: int) -> str:
@@ -27,35 +28,40 @@ class Presenters:
     @staticmethod
     async def format_model_list_as_image(
         models: list[dict[str, Any]], show_all: bool
-    ) -> BuildImage:
+    ) -> bytes:
         """将模型列表格式化为表格图片"""
-        title = "📋 LLM模型列表" + (" (所有已配置模型)" if show_all else " (仅可用)")
+        title = "LLM模型列表" + (" (所有已配置模型)" if show_all else " (仅可用)")
 
         if not models:
-            return await BuildImage.build_text_image(
-                f"{title}\n\n当前没有配置任何LLM模型。"
-            )
+            builder = TableBuilder(
+                title=title, tip="当前没有配置任何LLM模型。"
+            ).set_headers(["提供商", "模型名称", "API类型", "状态"])
+            return await renderer_service.render(builder.build())
 
         column_name = ["提供商", "模型名称", "API类型", "状态"]
-        data_list = []
+        rows_data = []
         for model in models:
-            status_text = "✅ 可用" if model.get("is_available", True) else "❌ 不可用"
+            is_available = model.get("is_available", True)
             embed_tag = " (Embed)" if model.get("is_embedding_model", False) else ""
-            data_list.append(
+            rows_data.append(
                 [
-                    model.get("provider_name", "N/A"),
-                    f"{model.get('model_name', 'N/A')}{embed_tag}",
-                    model.get("api_type", "N/A"),
-                    status_text,
+                    TextCell(content=model.get("provider_name", "N/A")),
+                    TextCell(content=f"{model.get('model_name', 'N/A')}{embed_tag}"),
+                    TextCell(content=model.get("api_type", "N/A")),
+                    StatusBadgeCell(
+                        text="可用" if is_available else "不可用",
+                        status_type="ok" if is_available else "error",
+                    ),
                 ]
             )
 
-        return await ImageTemplate.table_page(
-            head_text=title,
-            tip_text="使用 `llm info <Provider/ModelName>` 查看详情",
-            column_name=column_name,
-            data_list=data_list,
+        builder = TableBuilder(
+            title=title, tip="使用 `llm info <Provider/ModelName>` 查看详情"
         )
+        builder.set_headers(column_name)
+        builder.set_column_alignments(["left", "left", "left", "center"])
+        builder.add_rows(rows_data)
+        return await renderer_service.render(builder.build(), use_cache=True)
 
     @staticmethod
     async def format_model_details_as_markdown_image(details: dict[str, Any]) -> bytes:
@@ -76,77 +82,33 @@ class Presenters:
         if caps.is_embedding_model:
             cap_list.append("文本嵌入")
 
-        md = Markdown()
-        md.head(f"🔎 模型详情: {provider.name}/{model.model_name}", level=1)
-        md.text("---")
-        md.head("提供商信息", level=2)
-        md.list(
-            [
-                f"**名称**: {provider.name}",
-                f"**API 类型**: {provider.api_type}",
-                f"**API Base**: {provider.api_base or '默认'}",
-            ]
-        )
-        md.head("模型详情", level=2)
+        builder = MarkdownBuilder()
+        builder.head(f"🔎 模型详情: {provider.name}/{model.model_name}", 1)
+        builder.text("---")
+        builder.head("提供商信息", 2)
+        builder.text(f"- **名称**: {provider.name}")
+        builder.text(f"- **API 类型**: {provider.api_type}")
+        builder.text(f"- **API Base**: {provider.api_base or '默认'}")
+
+        builder.head("模型详情", 2)
 
         temp_value = model.temperature or provider.temperature or "未设置"
         token_value = model.max_tokens or provider.max_tokens or "未设置"
 
-        md.list(
-            [
-                f"**名称**: {model.model_name}",
-                f"**默认温度**: {temp_value}",
-                f"**最大Token**: {token_value}",
-                f"**核心能力**: {', '.join(cap_list) or '纯文本'}",
-            ]
-        )
+        builder.text(f"- **名称**: {model.model_name}")
+        builder.text(f"- **默认温度**: {temp_value}")
+        builder.text(f"- **最大Token**: {token_value}")
+        builder.text(f"- **核心能力**: {', '.join(cap_list) or '纯文本'}")
 
-        return await md.build()
+        return await renderer_service.render(builder.with_style("light").build())
 
     @staticmethod
     async def format_key_status_as_image(
         provider_name: str, sorted_stats: list[dict[str, Any]]
-    ) -> BuildImage:
+    ) -> bytes:
         """将已排序的、详细的API Key状态格式化为表格图片"""
         title = f"🔑 '{provider_name}' API Key 状态"
 
-        if not sorted_stats:
-            return await BuildImage.build_text_image(
-                f"{title}\n\n该提供商没有配置API Keys。"
-            )
-
-        def _status_row_style(column: str, text: str) -> RowStyle:
-            style = RowStyle()
-            if column == "状态":
-                if "✅ 健康" in text:
-                    style.font_color = "#67C23A"
-                elif "⚠️ 告警" in text:
-                    style.font_color = "#E6A23C"
-                elif "❌ 错误" in text or "🚫" in text:
-                    style.font_color = "#F56C6C"
-                elif "❄️ 冷却中" in text:
-                    style.font_color = "#409EFF"
-            elif column == "成功率":
-                try:
-                    if text != "N/A":
-                        rate = float(text.replace("%", ""))
-                        if rate < 80:
-                            style.font_color = "#F56C6C"
-                        elif rate < 95:
-                            style.font_color = "#E6A23C"
-                except (ValueError, TypeError):
-                    pass
-            return style
-
-        column_name = [
-            "Key (部分)",
-            "状态",
-            "总调用",
-            "成功率",
-            "平均延迟(s)",
-            "上次错误",
-            "建议操作",
-        ]
         data_list = []
 
         for key_info in sorted_stats:
@@ -155,15 +117,19 @@ class Presenters:
             if status_enum == KeyStatus.COOLDOWN:
                 cooldown_seconds = int(key_info["cooldown_seconds_left"])
                 formatted_time = _format_seconds(cooldown_seconds)
-                status_text = f"❄️ 冷却中({formatted_time})"
+                status_cell = StatusBadgeCell(
+                    text=f"冷却中({formatted_time})", status_type="info"
+                )
             else:
-                status_text = {
-                    KeyStatus.DISABLED: "🚫 永久禁用",
-                    KeyStatus.ERROR: "❌ 错误",
-                    KeyStatus.WARNING: "⚠️ 告警",
-                    KeyStatus.HEALTHY: "✅ 健康",
-                    KeyStatus.UNUSED: "⚪️ 未使用",
-                }.get(status_enum, "❔ 未知")
+                status_map = {
+                    KeyStatus.DISABLED: ("永久禁用", "error"),
+                    KeyStatus.ERROR: ("错误", "error"),
+                    KeyStatus.WARNING: ("告警", "warning"),
+                    KeyStatus.HEALTHY: ("健康", "ok"),
+                    KeyStatus.UNUSED: ("未使用", "info"),
+                }
+                text, status_type = status_map.get(status_enum, ("未知", "info"))
+                status_cell = StatusBadgeCell(text=text, status_type=status_type)  # type: ignore
 
             total_calls = key_info["total_calls"]
             total_calls_text = (
@@ -174,6 +140,13 @@ class Presenters:
 
             success_rate = key_info["success_rate"]
             success_rate_text = f"{success_rate:.1f}%" if total_calls > 0 else "N/A"
+            rate_color = None
+            if total_calls > 0:
+                if success_rate < 80:
+                    rate_color = "#F56C6C"
+                elif success_rate < 95:
+                    rate_color = "#E6A23C"
+            success_rate_cell = TextCell(content=success_rate_text, color=rate_color)
 
             avg_latency = key_info["avg_latency"]
             avg_latency_text = f"{avg_latency / 1000:.2f}" if avg_latency > 0 else "N/A"
@@ -184,21 +157,29 @@ class Presenters:
 
             data_list.append(
                 [
-                    key_info["key_id"],
-                    status_text,
-                    total_calls_text,
-                    success_rate_text,
-                    avg_latency_text,
-                    last_error,
-                    key_info["suggested_action"],
+                    TextCell(content=key_info["key_id"]),
+                    status_cell,
+                    TextCell(content=total_calls_text),
+                    success_rate_cell,
+                    TextCell(content=avg_latency_text),
+                    TextCell(content=last_error),
+                    TextCell(content=key_info["suggested_action"]),
                 ]
             )
 
-        return await ImageTemplate.table_page(
-            head_text=title,
-            tip_text="使用 `llm reset-key <Provider>` 重置Key状态",
-            column_name=column_name,
-            data_list=data_list,
-            text_style=_status_row_style,
-            column_space=15,
+        builder = TableBuilder(
+            title=title, tip="使用 `llm reset-key <Provider>` 重置Key状态"
         )
+        builder.set_headers(
+            [
+                "Key (部分)",
+                "状态",
+                "总调用",
+                "成功率",
+                "平均延迟(s)",
+                "上次错误",
+                "建议操作",
+            ]
+        )
+        builder.add_rows(data_list)
+        return await renderer_service.render(builder.build(), use_cache=False)
