@@ -56,13 +56,13 @@ def rule(message: UniMsg) -> bool:
 chat_history = on_message(rule=rule, priority=1, block=False)
 
 TEMP_LIST = []
-block_chars = "!！？?/.~"
+block_chars = "!！？?/.~@"
 
 
 @chat_history.handle()
 async def _(message: UniMsg, session: Uninfo):
     entity = get_entity_ids(session)
-    msg = str(message).strip()
+    msg = message.extract_plain_text().strip()
     blacklist_users = Config.get_config("chat_history", "BLACKLIST_USER")
     black_words = Config.get_config("chat_history", "BLACK_WORD")
     if len(msg) > 200 or len(msg) == 0 or msg[0] in block_chars or entity.user_id in blacklist_users:
@@ -74,8 +74,8 @@ async def _(message: UniMsg, session: Uninfo):
         ChatHistory(
             user_id=entity.user_id,
             group_id=entity.group_id,
-            text=msg,
-            plain_text=message.extract_plain_text(),
+            text=str(message).strip(),
+            plain_text=msg,
             bot_id=session.self_id,
             platform=session.platform,
         )
