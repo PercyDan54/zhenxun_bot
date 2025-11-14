@@ -21,6 +21,7 @@ from zhenxun.models.group_member_info import GroupInfoUser
 from zhenxun.models.user_console import UserConsole
 from zhenxun.models.user_gold_log import UserGoldLog
 from zhenxun.models.user_props_log import UserPropsLog
+from zhenxun.services import avatar_service
 from zhenxun.services.log import logger
 from zhenxun.ui.models import ImageCell, TextCell
 from zhenxun.utils.enum import GoldHandle, PropHandle
@@ -123,16 +124,18 @@ async def gold_rank(session: Uninfo, group_id: str | None, num: int) -> bytes | 
     data_list = []
     platform = PlatformUtils.get_platform(session)
     for i, user in enumerate(user_list):
-        ava_url = PlatformUtils.get_user_avatar_url(user[0], platform, session.self_id)
+        avatar_path = await avatar_service.get_avatar_path(platform, user[0])
         data_list.append(
             [
                 TextCell(content=f"{i + 1}"),
-                ImageCell(src=ava_url or "", shape="circle")
-                if platform == "qq"
+                ImageCell(
+                    src=avatar_path.as_uri() if avatar_path else "", shape="circle"
+                )
+                if avatar_path
                 else TextCell(content=""),
                 TextCell(content=uid2name.get(user[0]) or user[0]),
                 TextCell(content=str(user[1]), bold=True),
-                ImageCell(src=platform_path)
+                ImageCell(src=platform_path.resolve().as_uri())
                 if (platform_path := PLATFORM_PATH.get(platform))
                 else TextCell(content=""),
             ]
@@ -364,7 +367,7 @@ class ShopManage:
         else:
             goods_info = await GoodsInfo.get_or_none(goods_name=goods_name)
         if not goods_info:
-            return f"{goods_name} 不存在..."
+            return "对应的道具不存在..."
         if goods_info.is_passive:
             return f"{goods_info.goods_name} 是被动道具, 无法使用..."
         goods = cls.uuid2goods.get(goods_info.uuid)
@@ -529,18 +532,18 @@ class ShopManage:
             if not prop:
                 continue
 
-            icon = ""
+            icon = None
             if prop.icon:
                 icon_path = ICON_PATH / prop.icon
-                icon = icon_path if icon_path.exists() else ""
+                icon = icon_path if icon_path.exists() else None
 
             table_rows.append(
                 [
-                    ImageCell(src=icon, height=33, width=33),
-                    TextCell(content=i),
-                    TextCell(content=prop.goods_name),
-                    TextCell(content=user.props[prop_uuid]),
-                    TextCell(content=prop.goods_description),
+                    icon,
+                    i,
+                    prop.goods_name,
+                    user.props[prop_uuid],
+                    prop.goods_description,
                 ]
             )
 

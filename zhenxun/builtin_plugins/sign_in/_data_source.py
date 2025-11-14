@@ -13,6 +13,7 @@ from zhenxun.models.group_member_info import GroupInfoUser
 from zhenxun.models.sign_log import SignLog
 from zhenxun.models.sign_user import SignUser
 from zhenxun.models.user_console import UserConsole
+from zhenxun.services.avatar_service import avatar_service
 from zhenxun.services.log import logger
 from zhenxun.ui.models import ImageCell, TextCell
 from zhenxun.utils.platform import PlatformUtils
@@ -79,19 +80,21 @@ class SignManage:
         data_list = []
         platform = PlatformUtils.get_platform(session)
         for i, user in enumerate(user_list):
-            ava_url = PlatformUtils.get_user_avatar_url(
-                user[0], platform, session.self_id
+            avatar_path = await avatar_service.get_avatar_path(
+                platform=user[3] or "qq", identifier=user[0]
             )
             data_list.append(
                 [
                     TextCell(content=f"{i + 1}"),
-                    ImageCell(src=ava_url or "", shape="circle")
-                    if user[3] == "qq"
+                    ImageCell(
+                        src=avatar_path.as_uri() if avatar_path else "", shape="circle"
+                    )
+                    if avatar_path
                     else TextCell(content=""),
                     TextCell(content=uid2name.get(user[0]) or user[0]),
                     TextCell(content=str(user[1]), bold=True),
                     TextCell(content=str(user[2])),
-                    ImageCell(src=platform_path)
+                    ImageCell(src=platform_path.resolve().as_uri())
                     if (platform_path := PLATFORM_PATH.get(platform))
                     else TextCell(content=""),
                 ]
@@ -172,7 +175,7 @@ class SignManage:
         impression_added = (secrets.randbelow(99) + 1) / 100
         rand = random.random()
         add_probability = float(user.add_probability)
-        specify_probability = user.specify_probability
+        specify_probability = float(user.specify_probability)
         if rand + add_probability > 0.97 or rand < specify_probability:
             impression_added *= 2
         await SignUser.sign(user, impression_added, session.self_id, platform)

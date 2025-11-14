@@ -12,6 +12,8 @@ from typing import Any, TypeVar
 from pydantic import BaseModel
 
 from zhenxun.services.log import logger
+from zhenxun.utils.log_sanitizer import sanitize_for_logging
+from zhenxun.utils.pydantic_compat import dump_json_safely
 
 from .adapters.base import RequestData
 from .config import LLMGenerationConfig
@@ -34,7 +36,6 @@ from .types import (
     ToolExecutable,
 )
 from .types.capabilities import ModelCapabilities, ModelModality
-from .utils import _sanitize_request_body_for_logging
 
 T = TypeVar("T", bound=BaseModel)
 
@@ -187,21 +188,32 @@ class LLMModel(LLMModelBase):
             logger.debug(f"🔑 API密钥: {masked_key}")
             logger.debug(f"📋 请求头: {dict(request_data.headers)}")
 
-            sanitized_body = _sanitize_request_body_for_logging(request_data.body)
-            request_body_str = json.dumps(sanitized_body, ensure_ascii=False, indent=2)
+            sanitizer_req_context_map = {"gemini": "gemini_request"}
+            sanitizer_req_context = sanitizer_req_context_map.get(
+                self.api_type, "openai_request"
+            )
+            sanitized_body = sanitize_for_logging(
+                request_data.body, context=sanitizer_req_context
+            )
+            request_body_str = dump_json_safely(
+                sanitized_body, ensure_ascii=False, indent=2
+            )
             logger.debug(f"📦 请求体: {request_body_str}")
 
             http_response = await http_client.post(
                 request_data.url,
                 headers=request_data.headers,
-                json=request_data.body,
+                content=dump_json_safely(request_data.body, ensure_ascii=False),
             )
 
             logger.debug(f"📥 响应状态码: {http_response.status_code}")
             logger.debug(f"📄 响应头: {dict(http_response.headers)}")
 
+            response_bytes = await http_response.aread()
+            logger.debug(f"📦 响应体已完整读取 ({len(response_bytes)} bytes)")
+
             if http_response.status_code != 200:
-                error_text = http_response.text
+                error_text = response_bytes.decode("utf-8", errors="ignore")
                 logger.error(
                     f"❌ HTTP请求失败: {http_response.status_code} - {error_text} "
                     f"[{log_context}]"
@@ -232,13 +244,22 @@ class LLMModel(LLMModelBase):
                 )
 
             try:
-                response_json = http_response.json()
+                response_json = json.loads(response_bytes)
+
+                sanitizer_context_map = {"gemini": "gemini_response"}
+                sanitizer_context = sanitizer_context_map.get(
+                    self.api_type, "openai_response"
+                )
+
+                sanitized_for_log = sanitize_for_logging(
+                    response_json, context=sanitizer_context
+                )
+
                 response_json_str = json.dumps(
-                    response_json, ensure_ascii=False, indent=2
+                    sanitized_for_log, ensure_ascii=False, indent=2
                 )
                 logger.debug(f"📋 响应JSON: {response_json_str}")
                 parsed_data = parse_response_func(response_json)
-
             except Exception as e:
                 logger.error(f"解析 {log_context} 响应失败: {e}", e=e)
                 await self.key_store.record_failure(api_key, None, str(e))
@@ -290,7 +311,7 @@ class LLMModel(LLMModelBase):
             adapter.validate_embedding_response(response_json)
             return adapter.parse_embedding_response(response_json)
 
-        parsed_data, api_key_used = await self._perform_api_call(
+        parsed_data, _api_key_used = await self._perform_api_call(
             prepare_request_func=prepare_request,
             parse_response_func=parse_response,
             http_client=http_client,
@@ -376,6 +397,7 @@ class LLMModel(LLMModelBase):
             return LLMResponse(
                 text=response_data.text,
                 usage_info=response_data.usage_info,
+                images=response_data.images,
                 raw_response=response_data.raw_response,
                 tool_calls=response_tool_calls if response_tool_calls else None,
                 code_executions=response_data.code_executions,
@@ -390,6 +412,56 @@ class LLMModel(LLMModelBase):
             failed_keys=failed_keys,
             log_context="Generation",
         )
+
+        if config:
+            if config.response_validator:
+                try:
+                    config.response_validator(parsed_data)
+                except Exception as e:
+                    raise LLMException(
+                        f"响应内容未通过自定义验证器: {e}",
+                        code=LLMErrorCode.API_RESPONSE_INVALID,
+                        details={"validator_error": str(e)},
+                        cause=e,
+                    ) from e
+
+            policy = config.validation_policy
+            if policy:
+                if policy.get("require_image") and not parsed_data.images:
+                    if self.api_type == "gemini" and parsed_data.raw_response:
+                        usage_metadata = parsed_data.raw_response.get(
+                            "usageMetadata", {}
+                        )
+                        prompt_token_details = usage_metadata.get(
+                            "promptTokensDetails", []
+                        )
+                        prompt_had_image = any(
+                            detail.get("modality") == "IMAGE"
+                            for detail in prompt_token_details
+                        )
+
+                        if prompt_had_image:
+                            raise LLMException(
+                                "响应验证失败：模型接收了图片输入但未生成图片。",
+                                code=LLMErrorCode.API_RESPONSE_INVALID,
+                                details={
+                                    "policy": policy,
+                                    "text_response": parsed_data.text,
+                                    "raw_response": parsed_data.raw_response,
+                                },
+                            )
+                        else:
+                            logger.debug("Gemini提示词中未包含图片，跳过图片要求重试。")
+                    else:
+                        raise LLMException(
+                            "响应验证失败：要求返回图片但未找到图片数据。",
+                            code=LLMErrorCode.API_RESPONSE_INVALID,
+                            details={
+                                "policy": policy,
+                                "text_response": parsed_data.text,
+                            },
+                        )
+
         return parsed_data, api_key_used
 
     async def close(self):

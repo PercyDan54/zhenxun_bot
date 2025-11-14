@@ -22,6 +22,7 @@ from zhenxun.configs.config import Config
 from zhenxun.configs.path_config import THEMES_PATH, UI_CACHE_PATH
 from zhenxun.services.log import logger
 from zhenxun.utils.exception import RenderingError
+from zhenxun.utils.log_sanitizer import sanitize_for_logging
 from zhenxun.utils.pydantic_compat import _dump_pydantic_obj
 
 from .config import RESERVED_TEMPLATE_KEYS
@@ -216,16 +217,17 @@ class RendererService:
         context.processed_components.add(component_id)
 
         component_path_base = str(component.template_name)
+        variant = getattr(component, "variant", None)
         manifest = await context.theme_manager.get_template_manifest(
-            component_path_base
+            component_path_base, skin=variant
         )
 
         style_paths_to_load = []
-        if manifest and manifest.styles:
+        if manifest and "styles" in manifest:
             styles = (
-                [manifest.styles]
-                if isinstance(manifest.styles, str)
-                else manifest.styles
+                [manifest["styles"]]
+                if isinstance(manifest["styles"], str)
+                else manifest["styles"]
             )
             for style_path in styles:
                 full_style_path = str(Path(component_path_base) / style_path).replace(
@@ -382,6 +384,7 @@ class RendererService:
                 )
 
                 temp_env.globals.update(context.theme_manager.jinja_env.globals)
+                temp_env.filters.update(context.theme_manager.jinja_env.filters)
                 temp_env.globals["asset"] = (
                     context.theme_manager._create_standalone_asset_loader(template_dir)
                 )
@@ -430,10 +433,11 @@ class RendererService:
                     component_render_options = {}
 
                 manifest_options = {}
+                variant = getattr(component, "variant", None)
                 if manifest := await context.theme_manager.get_template_manifest(
-                    component.template_name
+                    component.template_name, skin=variant
                 ):
-                    manifest_options = manifest.render_options or {}
+                    manifest_options = manifest.get("render_options", {})
 
                 final_render_options = component_render_options.copy()
                 final_render_options.update(manifest_options)
@@ -470,10 +474,7 @@ class RendererService:
             ) from e
 
     async def render(
-        self,
-        component: Renderable,
-        use_cache: bool = False,
-        **render_options,
+        self, component: Renderable, use_cache: bool = False, **render_options
     ) -> bytes:
         """
         统一的、多态的渲染入口，直接返回图片字节。
@@ -504,9 +505,12 @@ class RendererService:
         )
         result = await self._render_component(context)
         if Config.get_config("UI", "DEBUG_MODE") and result.html_content:
+            sanitized_html = sanitize_for_logging(
+                result.html_content, context="ui_html"
+            )
             logger.info(
                 f"--- [UI DEBUG] HTML for {component.__class__.__name__} ---\n"
-                f"{result.html_content}\n"
+                f"{sanitized_html}\n"
                 f"--- [UI DEBUG] End of HTML ---"
             )
         if result.image_bytes is None:
@@ -556,6 +560,8 @@ class RendererService:
             await self.initialize()
         assert self._theme_manager is not None, "ThemeManager 未初始化"
 
+        self._theme_manager._manifest_cache.clear()
+        logger.debug("已清除UI清单缓存 (manifest cache)。")
         current_theme_name = Config.get_config("UI", "THEME", "default")
         await self._theme_manager.load_theme(current_theme_name)
         logger.info(f"主题 '{current_theme_name}' 已成功重载。")

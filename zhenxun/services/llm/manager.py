@@ -5,12 +5,12 @@ LLM 模型管理器
 """
 
 import hashlib
-import json
 import time
 from typing import Any
 
 from zhenxun.configs.config import Config
 from zhenxun.services.log import logger
+from zhenxun.utils.pydantic_compat import dump_json_safely
 
 from .config import validate_override_params
 from .config.providers import AI_CONFIG_GROUP, PROVIDERS_CONFIG_KEY, get_ai_config
@@ -43,7 +43,7 @@ def _make_cache_key(
 ) -> str:
     """生成缓存键"""
     config_str = (
-        json.dumps(override_config, sort_keys=True) if override_config else "None"
+        dump_json_safely(override_config, sort_keys=True) if override_config else "None"
     )
     key_data = f"{provider_model_name}:{config_str}"
     return hashlib.md5(key_data.encode()).hexdigest()
@@ -118,6 +118,7 @@ def get_default_api_base_for_type(api_type: str) -> str | None:
         "deepseek": "https://api.deepseek.com",
         "zhipu": "https://open.bigmodel.cn",
         "gemini": "https://generativelanguage.googleapis.com",
+        "openrouter": "https://openrouter.ai/api",
         "general_openai_compat": None,
     }
 

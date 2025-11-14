@@ -5,10 +5,14 @@ Pydantic V1 & V2 兼容层模块
 包括 model_dump, model_copy, model_json_schema, parse_as 等。
 """
 
+from datetime import datetime
+from enum import Enum
+from pathlib import Path
 from typing import Any, TypeVar, get_args, get_origin
 
 from nonebot.compat import PYDANTIC_V2, model_dump
 from pydantic import VERSION, BaseModel
+import ujson as json
 
 T = TypeVar("T", bound=BaseModel)
 V = TypeVar("V")
@@ -19,9 +23,11 @@ __all__ = [
     "_dump_pydantic_obj",
     "_is_pydantic_type",
     "compat_computed_field",
+    "dump_json_safely",
     "model_copy",
     "model_dump",
     "model_json_schema",
+    "model_validate",
     "parse_as",
 ]
 
@@ -37,6 +43,16 @@ def model_copy(
     else:
         update_dict = update or {}
         return model.copy(update=update_dict, deep=deep)
+
+
+def model_validate(model_class: type[T], obj: Any) -> T:
+    """
+    Pydantic `model_validate` (v2) 与 `parse_obj` (v1) 的兼容函数。
+    """
+    if PYDANTIC_V2:
+        return model_class.model_validate(obj)
+    else:
+        return model_class.parse_obj(obj)
 
 
 if PYDANTIC_V2:
@@ -93,3 +109,26 @@ def parse_as(type_: type[V], obj: Any) -> V:
         from pydantic import TypeAdapter  # type: ignore
 
         return TypeAdapter(type_).validate_python(obj)
+
+
+def dump_json_safely(obj: Any, **kwargs) -> str:
+    """
+    安全地将可能包含 Pydantic 特定类型 (如 Enum) 的对象序列化为 JSON 字符串。
+    """
+
+    def default_serializer(o):
+        if isinstance(o, Enum):
+            return o.value
+        if isinstance(o, datetime):
+            return o.isoformat()
+        if isinstance(o, Path):
+            return str(o.as_posix())
+        if isinstance(o, set):
+            return list(o)
+        if isinstance(o, BaseModel):
+            return model_dump(o)
+        raise TypeError(
+            f"Object of type {o.__class__.__name__} is not JSON serializable"
+        )
+
+    return json.dumps(obj, default=default_serializer, **kwargs)

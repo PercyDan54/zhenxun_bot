@@ -18,6 +18,7 @@ require("nonebot_plugin_htmlrender")
 require("nonebot_plugin_uninfo")
 require("nonebot_plugin_waiter")
 
+from .avatar_service import avatar_service
 from .db_context import Model, disconnect, with_db_timeout
 from .llm import (
     AI,
@@ -44,12 +45,18 @@ from .llm import (
 from .log import logger
 from .plugin_init import PluginInit, PluginInitManager
 from .renderer import renderer_service
-from .scheduler import scheduler_manager
+from .scheduler import (
+    ExecutionPolicy,
+    ScheduleContext,
+    Trigger,
+    scheduler_manager,
+)
 
 __all__ = [
     "AI",
     "AIConfig",
     "CommonOverrides",
+    "ExecutionPolicy",
     "LLMContentPart",
     "LLMException",
     "LLMGenerationConfig",
@@ -57,6 +64,9 @@ __all__ = [
     "Model",
     "PluginInit",
     "PluginInitManager",
+    "ScheduleContext",
+    "Trigger",
+    "avatar_service",
     "chat",
     "clear_model_cache",
     "code",
