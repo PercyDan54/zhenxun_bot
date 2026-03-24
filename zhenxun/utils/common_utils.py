@@ -1,3 +1,5 @@
+from collections.abc import Callable
+import random
 import re
 from typing import overload
 
@@ -5,10 +7,14 @@ from nonebot.adapters import Bot
 from nonebot_plugin_uninfo import Session, SupportScope, Uninfo, get_interface
 
 from zhenxun.configs.config import BotConfig
-from zhenxun.models.ban_console import BanConsole
-from zhenxun.models.bot_console import BotConsole
+from zhenxun.configs.path_config import THEMES_PATH
 from zhenxun.models.group_console import GroupConsole
-from zhenxun.models.task_info import TaskInfo
+from zhenxun.services.cache.runtime_cache import (
+    BanMemoryCache,
+    BotMemoryCache,
+    GroupMemoryCache,
+    TaskInfoMemoryCache,
+)
 from zhenxun.services.log import logger
 
 
@@ -39,26 +45,27 @@ class CommonUtils:
             return False
         if not group_id and isinstance(session, Session):
             group_id = session.group.id if session.group else None
-        if task := await TaskInfo.get_or_none(module=module):
+        if await TaskInfoMemoryCache.is_disabled(module):
             """被动全局状态"""
-            if not task.status:
-                return True
-        if not await BotConsole.get_bot_status(session.self_id):
+            return True
+        bot_snapshot = await BotMemoryCache.get(session.self_id)
+        if bot_snapshot and not bot_snapshot.status:
             """bot是否休眠"""
             return True
-        block_tasks = await BotConsole.get_tasks(session.self_id, False)
-        if module in block_tasks:
-            """bot是否禁用被动"""
-            return True
+        if bot_snapshot:
+            block_tasks = cls.convert_module_format(bot_snapshot.block_tasks)
+            if module in block_tasks:
+                """bot是否禁用被动"""
+                return True
         if group_id:
             if await GroupConsole.is_block_task(group_id, module):
                 """群组是否禁用被动"""
                 return True
-            if g := await GroupConsole.get_group(group_id=group_id):
+            if g := GroupMemoryCache.get_if_ready(group_id, None):
                 """群组权限是否小于0"""
                 if g.level < 0:
                     return True
-            if await BanConsole.is_ban(None, group_id):
+            if BanMemoryCache.is_banned(None, group_id):
                 """群组是否被ban"""
                 return True
         return False
@@ -90,6 +97,31 @@ class CommonUtils:
             return [item.strip(",") for item in data.split("<") if item]
         elif isinstance(data, list):
             return "".join(cls.format(item) for item in data)
+
+    @staticmethod
+    def get_random_asset_factory(sub_path: str) -> Callable[[], str | None]:
+        """
+        创建一个从指定 assets 子目录随机选取资源的工厂函数。
+        用于 Pydantic 模型的 default_factory。
+
+        参数:
+            sub_path: 相对于 themes/default/assets/ 的子路径，例如 "ui/zhenxun/down"
+        """
+
+        def _factory() -> str | None:
+            target_dir = THEMES_PATH / "default" / "assets" / sub_path
+            if not target_dir.exists():
+                return None
+
+            images = [
+                f.name
+                for f in target_dir.iterdir()
+                if f.is_file()
+                and f.suffix.lower() in [".png", ".jpg", ".jpeg", ".webp"]
+            ]
+            return f"{sub_path}/{random.choice(images)}" if images else None
+
+        return _factory
 
 
 class SqlUtils:

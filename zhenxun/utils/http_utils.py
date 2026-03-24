@@ -1,4 +1,5 @@
 import asyncio
+from collections import OrderedDict
 from collections.abc import AsyncGenerator, Awaitable, Callable, Sequence
 from contextlib import asynccontextmanager
 import os
@@ -164,6 +165,72 @@ class AsyncHttpx:
         else None
     )
 
+    _CONTENT_CACHE_TTL: ClassVar[float] = 3.0
+    _CONTENT_CACHE_MAX_ITEMS: ClassVar[int] = 256
+    _CONTENT_CACHE_MAX_BYTES: ClassVar[int] = 2 * 1024 * 1024
+    _content_cache: ClassVar[OrderedDict[str, tuple[float, bytes]]] = OrderedDict()
+    _content_inflight: ClassVar[dict[str, asyncio.Task[Response]]] = {}
+    _content_cache_lock: ClassVar[asyncio.Lock] = asyncio.Lock()
+
+    @classmethod
+    def _is_probably_image_url(cls, url: str) -> bool:
+        lower_url = url.lower()
+        if any(
+            ext in lower_url
+            for ext in (
+                ".jpg",
+                ".jpeg",
+                ".png",
+                ".webp",
+                ".gif",
+                ".bmp",
+                ".avif",
+                ".heic",
+            )
+        ):
+            return True
+        return "qpic.cn" in lower_url or "qlogo.cn" in lower_url
+
+    @classmethod
+    def _get_cached_content_nolock(cls, key: str) -> bytes | None:
+        entry = cls._content_cache.get(key)
+        if not entry:
+            return None
+        expire_at, content = entry
+        if expire_at <= time.monotonic():
+            cls._content_cache.pop(key, None)
+            return None
+        cls._content_cache.move_to_end(key)
+        return content
+
+    @classmethod
+    def _cleanup_content_cache_nolock(cls) -> None:
+        now = time.monotonic()
+        while cls._content_cache:
+            expire_at, _ = next(iter(cls._content_cache.values()))
+            if expire_at > now:
+                break
+            cls._content_cache.popitem(last=False)
+        while len(cls._content_cache) > cls._CONTENT_CACHE_MAX_ITEMS:
+            cls._content_cache.popitem(last=False)
+
+    @classmethod
+    async def _try_cache_content(cls, key: str, response: Response) -> None:
+        content = response.content
+        if not content or len(content) > cls._CONTENT_CACHE_MAX_BYTES:
+            return
+        content_type = response.headers.get("content-type", "").lower()
+        is_image = content_type.startswith("image/") or cls._is_probably_image_url(key)
+        if not is_image:
+            return
+        async with cls._content_cache_lock:
+            cls._content_cache[key] = (
+                time.monotonic() + cls._CONTENT_CACHE_TTL,
+                content,
+            )
+            cls._content_cache.move_to_end(key)
+            cls._cleanup_content_cache_nolock()
+
     @classmethod
     def _prepare_temporary_client_config(cls, client_kwargs: dict) -> dict:
         """
@@ -219,8 +286,12 @@ class AsyncHttpx:
     ) -> Response:
         """
         执行单次HTTP请求的私有方法，内置了默认的重试逻辑。
+        accept_status_codes: 若提供，这些状态码不视为错误，不调用 raise_for_status。
         """
         client_kwargs, request_kwargs = cls._split_kwargs(kwargs)
+        accept_status_codes: Sequence[int] | None = request_kwargs.pop(
+            "accept_status_codes", None
+        )
 
         async with cls._get_active_client_context(
             client=client, **client_kwargs
@@ -228,7 +299,11 @@ class AsyncHttpx:
             response = await cls()._execute_request_inner(
                 active_client, method, url, **request_kwargs
             )
-            response.raise_for_status()
+            if (
+                accept_status_codes is None
+                or response.status_code not in accept_status_codes
+            ):
+                response.raise_for_status()
             return response
 
     @classmethod
@@ -292,6 +367,7 @@ class AsyncHttpx:
         *,
         follow_redirects: bool = True,
         check_status_code: int | None = None,
+        accept_status_codes: Sequence[int] | None = None,
         client: AsyncClient | None = None,
         **kwargs,
     ) -> Response:
@@ -301,6 +377,8 @@ class AsyncHttpx:
             url: 单个请求 URL 或一个 URL 列表。
             follow_redirects: 是否跟随重定向。
             check_status_code: (可选) 若提供，将检查响应状态码是否匹配，否则抛出异常。
+            accept_status_codes: (可选) 这些状态码不视为错误，
+                                如 (302,) 用于接受重定向响应。
             client: (可选) 指定一个活动的HTTP客户端实例。若提供，则忽略
                     `**kwargs`中的客户端配置。
             **kwargs: 其他所有传递给 httpx.get 的参数 (如 `params`, `headers`,
@@ -316,6 +394,8 @@ class AsyncHttpx:
 
         async def worker(current_url: str, **worker_kwargs) -> Response:
             logger.info(f"开始获取 {current_url}..", "AsyncHttpx:get")
+            if accept_status_codes is not None:
+                worker_kwargs["accept_status_codes"] = accept_status_codes
             response = await cls._single_request(
                 "GET", current_url, follow_redirects=follow_redirects, **worker_kwargs
             )
@@ -342,11 +422,20 @@ class AsyncHttpx:
 
     @classmethod
     async def post(
-        cls, url: str | list[str], *, client: AsyncClient | None = None, **kwargs
+        cls,
+        url: str | list[str],
+        *,
+        accept_status_codes: Sequence[int] | None = None,
+        client: AsyncClient | None = None,
+        **kwargs,
     ) -> Response:
-        """发送 POST 请求，并返回第一个成功的响应。"""
+        """发送 POST 请求，并返回第一个成功的响应。
+        accept_status_codes: (可选) 这些状态码不视为错误，如 (302,) 用于接受重定向响应。
+        """
 
         async def worker(current_url: str, **worker_kwargs) -> Response:
+            if accept_status_codes is not None:
+                worker_kwargs["accept_status_codes"] = accept_status_codes
             return await cls._single_request("POST", current_url, **worker_kwargs)
 
         return await cls._execute_with_fallbacks(url, worker, client=client, **kwargs)
@@ -356,7 +445,29 @@ class AsyncHttpx:
         cls, url: str | list[str], *, client: AsyncClient | None = None, **kwargs
     ) -> bytes:
         """获取指定 URL 的二进制内容。"""
-        res = await cls.get(url, client=client, **kwargs)
+        if not isinstance(url, str):
+            res = await cls.get(url, client=client, **kwargs)
+            return res.content
+
+        cache_key = url
+        async with cls._content_cache_lock:
+            cached = cls._get_cached_content_nolock(cache_key)
+            if cached is not None:
+                return cached
+            task = cls._content_inflight.get(cache_key)
+            if task is None:
+                task = asyncio.create_task(cls.get(url, client=client, **kwargs))
+                cls._content_inflight[cache_key] = task
+
+                def _cleanup_inflight(
+                    _: asyncio.Task[Response], key: str = cache_key
+                ) -> None:
+                    cls._content_inflight.pop(key, None)
+
+                task.add_done_callback(_cleanup_inflight)
+
+        res = await task
+        await cls._try_cache_content(cache_key, res)
         return res.content
 
     @classmethod

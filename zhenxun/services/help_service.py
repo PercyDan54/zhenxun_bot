@@ -5,13 +5,19 @@ from nonebot.plugin import PluginMetadata
 from pydantic import BaseModel
 
 from zhenxun import ui
-from zhenxun.configs.config import BotConfig
+from zhenxun.configs.config import BotConfig, Config
 from zhenxun.models.plugin_info import PluginInfo
 from zhenxun.models.task_info import TaskInfo
-from zhenxun.ui.builders import PluginHelpPageBuilder
-from zhenxun.ui.models import HelpCategory, HelpItem
+from zhenxun.services.renderer.result_cache import RenderResultMemoryCache
+from zhenxun.ui.models import HelpCategory, HelpItem, PluginHelpPageData
 from zhenxun.utils.common_utils import format_usage_for_markdown
 from zhenxun.utils.enum import PluginType
+
+_PLUGIN_HELP_IMAGE_CACHE = RenderResultMemoryCache(
+    ttl_seconds=300,
+    max_items=48,
+    max_total_bytes=48 * 1024 * 1024,
+)
 
 
 class PluginData(BaseModel):
@@ -82,12 +88,11 @@ async def create_plugin_help_image(
             )
         )
 
-    builder = PluginHelpPageBuilder(
-        bot_nickname=BotConfig.self_nickname, page_title=page_title
-    )
+    # 直接构建 HelpCategory 列表
+    categories = []
 
     for menu_type, items in grouped_plugins.items():
-        builder.add_category(
+        categories.append(
             HelpCategory(
                 title=menu_type,
                 icon_svg_path="M12,2L15.09,8.26L22,9.27L17,14.14L18.18,21.02L12,17.77L5.82,21.02L7,14.14L2,9.27L8.91,8.26L12,2Z",
@@ -98,7 +103,7 @@ async def create_plugin_help_image(
     task_category_data = await _get_task_category()
     if task_category_data["items"]:
         task_items = [HelpItem(**item) for item in task_category_data["items"]]
-        builder.add_category(
+        categories.append(
             HelpCategory(
                 title=task_category_data["title"],
                 icon_svg_path=task_category_data["icon_svg_path"],
@@ -106,6 +111,30 @@ async def create_plugin_help_image(
             )
         )
 
-    image_bytes = await ui.render(builder.build(), use_cache=True)
+    # 直接实例化 Data Model
+    page_data = PluginHelpPageData(
+        bot_nickname=BotConfig.self_nickname,
+        page_title=page_title,
+        categories=categories,
+    )
+
+    cache_payload = {
+        "plugin_types": sorted([plugin_type.value for plugin_type in plugin_types]),
+        "page_title": page_title,
+        "theme": Config.get_config("UI", "THEME", "default"),
+        "page_data": page_data,
+    }
+    cache_key = RenderResultMemoryCache.build_key(cache_payload)
+    if cached_image := await _PLUGIN_HELP_IMAGE_CACHE.get(cache_key):
+        return cached_image
+
+    image_bytes = await ui.render(
+        page_data,
+        use_cache=True,
+        clip_selector=".container",
+        clip_padding=20,
+        disable_animations=True,
+    )
+    await _PLUGIN_HELP_IMAGE_CACHE.set(cache_key, image_bytes)
 
     return image_bytes

@@ -17,11 +17,8 @@ from zhenxun.services import (
     generate,
 )
 from zhenxun.services.log import logger
-from zhenxun.ui.builders import (
-    NotebookBuilder,
-    PluginMenuBuilder,
-)
-from zhenxun.ui.models import PluginMenuCategory
+from zhenxun.services.renderer.result_cache import RenderResultMemoryCache
+from zhenxun.ui.models import PluginMenuCategory, PluginMenuData
 from zhenxun.utils.common_utils import format_usage_for_markdown
 from zhenxun.utils.enum import BlockType, PluginType
 from zhenxun.utils.platform import PlatformUtils
@@ -32,6 +29,11 @@ random_bk_path = IMAGE_PATH / "background" / "help" / "simple_help"
 background = IMAGE_PATH / "background" / "0.png"
 
 driver = nonebot.get_driver()
+_HELP_MENU_IMAGE_CACHE = RenderResultMemoryCache(
+    ttl_seconds=300,
+    max_items=64,
+    max_total_bytes=64 * 1024 * 1024,
+)
 
 
 def _create_plugin_menu_item(
@@ -109,18 +111,41 @@ async def create_help_img(
     bot_avatar_path = await avatar_service.get_avatar_path(platform, bot_id)
     bot_avatar_url = bot_avatar_path.as_uri() if bot_avatar_path else ""
 
-    builder = PluginMenuBuilder(
-        bot_name=BotConfig.self_nickname,
-        bot_avatar_url=bot_avatar_url,
-        is_detail=is_detail,
-    )
-
+    categories_objects = []
     for category in categories_for_model:
-        builder.add_category(
+        categories_objects.append(
             PluginMenuCategory(name=category["name"], items=category["items"])
         )
 
-    return await ui.render(builder.build())
+    # 直接实例化 Data Model
+    menu_data = PluginMenuData(
+        bot_name=BotConfig.self_nickname,
+        bot_avatar_url=bot_avatar_url,
+        is_detail=is_detail,
+        plugin_count=plugin_count,
+        active_count=active_count,
+        categories=categories_objects,
+    )
+
+    cache_payload = {
+        "self_id": session.self_id,
+        "group_id": group_id,
+        "is_detail": is_detail,
+        "theme": Config.get_config("UI", "THEME", "default"),
+        "menu_data": menu_data,
+    }
+    cache_key = RenderResultMemoryCache.build_key(cache_payload)
+    if cached_image := await _HELP_MENU_IMAGE_CACHE.get(cache_key):
+        return cached_image
+
+    image_bytes = await ui.render(
+        menu_data,
+        clip_selector=".wrapper",
+        clip_padding=20,
+        disable_animations=True,
+    )
+    await _HELP_MENU_IMAGE_CACHE.set(cache_key, image_bytes)
+    return image_bytes
 
 
 async def get_user_allow_help(user_id: str) -> list[PluginType]:
@@ -299,9 +324,9 @@ async def get_llm_help(question: str, user_id: str) -> str | bytes:
         threshold = Config.get_config("help", "LLM_HELPER_REPLY_AS_IMAGE_THRESHOLD", 50)
 
         if len(reply_text) > threshold:
-            builder = NotebookBuilder()
-            builder.text(reply_text)
-            return await ui.render(builder.build())
+            notebook = ui.notebook()
+            notebook.text(reply_text)
+            return await ui.render(notebook)
 
         return reply_text
 
