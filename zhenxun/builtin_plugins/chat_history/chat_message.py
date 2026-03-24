@@ -38,7 +38,7 @@ __plugin_meta__ = PluginMetadata(
                 help="包含以下关键词消息不存储",
                 value=["签到", "抽签", "http:", "https:", "pptth", "nbnhhsh", "io"],
                 default_value=["签到", "抽签", "http:", "https:", "pptth", "nbnhhsh", "io"],
-                type=List[str],
+                type=list[str],
             ),
             RegisterConfig(
                 module="chat_history",
@@ -46,7 +46,7 @@ __plugin_meta__ = PluginMetadata(
                 help="以下用户的消息不存储",
                 value= [],
                 default_value=[],
-                type=List[int],
+                type=list[int],
             )
         ],
     ).to_dict(),
@@ -75,7 +75,7 @@ async def _(message: UniMsg, session: Uninfo):
         msg = str(message).strip()
         blacklist_users = Config.get_config("chat_history", "BLACKLIST_USER")
         black_words = Config.get_config("chat_history", "BLACK_WORD")
-        if len(msg) > 200 or session.id1 in blacklist_users or msg.startswith('!') or msg.startswith('?') or msg.startswith('？') or msg.startswith('！') or msg.startswith('/'):
+        if len(msg) > 200 or entity.user_id in blacklist_users or msg.startswith('!') or msg.startswith('?') or msg.startswith('？') or msg.startswith('！') or msg.startswith('/'):
             return
         for w in black_words:
             if str(w) in msg:
